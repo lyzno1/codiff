@@ -462,6 +462,12 @@ function Sidebar({
           aria-label="Filter changed files"
           className="sidebar-search"
           onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+              event.currentTarget.select();
+              event.preventDefault();
+            }
+          }}
           placeholder="Filter files"
           spellCheck={false}
           type="search"
