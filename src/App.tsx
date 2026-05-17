@@ -911,6 +911,11 @@ export const buildReviewCommentsMarkdown = (
   return markdown ? `# Address these Review Comments\n\n${markdown}` : '';
 };
 
+export const shouldDiscardReviewCommentOnEscape = (
+  body: string,
+  confirmDiscard: (message: string) => boolean = window.confirm,
+) => body.trim().length === 0 || confirmDiscard('Discard this review comment?');
+
 function Sidebar({
   files,
   mode,
@@ -1316,6 +1321,22 @@ function ReviewAnnotation({
     }
   }, [focusCommentId, focusCommentRequest, hasFocusedComment]);
 
+  const handleCommentKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>, comment: ReviewComment) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (shouldDiscardReviewCommentOnEscape(comment.body)) {
+        onDeleteComment(comment.id);
+      }
+    },
+    [onDeleteComment],
+  );
+
   if (annotationComments.length === 0) {
     return null;
   }
@@ -1345,6 +1366,7 @@ function ReviewAnnotation({
               aria-label={`Comment on ${comment.filePath} line ${comment.lineNumber}`}
               className="review-comment-input"
               onChange={(event) => onUpdateComment(comment.id, event.currentTarget.value)}
+              onKeyDown={(event) => handleCommentKeyDown(event, comment)}
               placeholder="Write a review comment…"
               ref={comment.id === focusCommentId ? focusTextareaRef : undefined}
               rows={3}

@@ -5,6 +5,7 @@ import {
   getDiffSearchResult,
   getVisibleDiffSections,
   isDiffSearchShortcut,
+  shouldDiscardReviewCommentOnEscape,
 } from './App.tsx';
 import type { ChangedFile } from './types.ts';
 
@@ -171,4 +172,21 @@ test('review comment markdown includes file and patch context', () => {
   expect(markdown.indexOf('```diff')).toBeLessThan(
     markdown.indexOf('Please double-check this value.'),
   );
+});
+
+test('escape discards empty review comments without confirmation', () => {
+  let confirmationCount = 0;
+
+  expect(
+    shouldDiscardReviewCommentOnEscape('   ', () => {
+      confirmationCount += 1;
+      return false;
+    }),
+  ).toBe(true);
+  expect(confirmationCount).toBe(0);
+});
+
+test('escape confirms before discarding review comments with text', () => {
+  expect(shouldDiscardReviewCommentOnEscape('Needs work.', () => false)).toBe(false);
+  expect(shouldDiscardReviewCommentOnEscape('Needs work.', () => true)).toBe(true);
 });
