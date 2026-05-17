@@ -713,7 +713,7 @@
   background: color-mix(in srgb, var(--code-bg) 78%, transparent);
   border: 1px solid var(--file-border);
   border-radius: 50%;
-  bottom: 22px;
+  bottom: 16px;
   box-shadow:
     0 0 0 1px rgb(255 255 255 / 0.16) inset,
     0 0 0 1px var(--file-border),
@@ -727,7 +727,7 @@
   justify-content: center;
   padding: 0;
   position: fixed;
-  right: 22px;
+  right: 16px;
   transition: all 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform: scale(1);
   width: 46px;
