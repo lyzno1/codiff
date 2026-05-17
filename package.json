@@ -2,6 +2,7 @@
   "name": "codiff",
   "version": "0.1.0",
   "description": "A visual diff tool for Git changes.",
+  "license": "MIT",
   "author": "Christoph Nakazawa <christoph.pojer@gmail.com>",
   "repository": {
     "type": "git",

@@ -52,6 +52,7 @@ module.exports = {
     appBundleId: 'dev.nkzw-tech.codiff',
     appCopyright: 'Copyright (c) 2026-current Nakazawa Tech',
     asar: false,
+    executableName: 'codiff',
     ...(iconPath ? { icon: iconPath } : {}),
     ignore: [
       /^\/\.DS_Store$/,
