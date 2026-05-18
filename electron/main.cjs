@@ -5,6 +5,7 @@ const {
   existsSync,
   lstatSync,
   mkdirSync,
+  realpathSync,
   readFileSync,
   symlinkSync,
   unlinkSync,
@@ -78,8 +79,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
 
   const envCommitRef = useEnvironment ? process.env.CODIFF_COMMIT_REF || '' : '';
   const sourceRef = envCommitRef || commitRef;
+  const repositoryPathProvided = Boolean(
+    repositoryPath || (useEnvironment && process.env.CODIFF_REPOSITORY_PATH),
+  );
   return {
     launchOptions: {
+      repositoryPathProvided,
       source: sourceRef
         ? {
             ref: sourceRef,
@@ -196,12 +201,62 @@ const openRepositoryFolder = async (browserWindow) => {
   });
 
   if (!result.canceled && result.filePaths[0]) {
-    createWindow(result.filePaths[0], { walkthrough: false });
+    createWindow(result.filePaths[0], { repositoryPathProvided: true, walkthrough: false });
   }
 };
 
 const getTerminalHelperSourcePath = () =>
   app.isPackaged ? join(process.resourcesPath, 'app/bin/codiff-app') : join(root, 'bin/codiff.js');
+
+const getTerminalHelperTargetPaths = () => [
+  '/opt/homebrew/bin/codiff',
+  '/usr/local/bin/codiff',
+  join(app.getPath('home'), '.local/bin/codiff'),
+];
+
+const getPreferredTerminalHelperTargetPath = () => {
+  for (const directory of ['/opt/homebrew/bin', '/usr/local/bin']) {
+    try {
+      if (existsSync(directory)) {
+        accessSync(directory, constants.W_OK);
+        return join(directory, 'codiff');
+      }
+    } catch {
+      // Keep looking for a writable install location.
+    }
+  }
+
+  return join(app.getPath('home'), '.local/bin/codiff');
+};
+
+const isInstalledTerminalHelper = (targetPath) => {
+  try {
+    if (!existsSync(targetPath)) {
+      return false;
+    }
+
+    const target = lstatSync(targetPath);
+    if (!target.isSymbolicLink()) {
+      return false;
+    }
+
+    return realpathSync(targetPath) === realpathSync(getTerminalHelperSourcePath());
+  } catch {
+    return false;
+  }
+};
+
+const getTerminalHelperStatus = () => {
+  const installedPath = getTerminalHelperTargetPaths().find((targetPath) =>
+    isInstalledTerminalHelper(targetPath),
+  );
+
+  return {
+    command: 'codiff',
+    installed: installedPath != null,
+    path: installedPath || getPreferredTerminalHelperTargetPath(),
+  };
+};
 
 const getWritableHelperDirectory = () => {
   for (const directory of ['/opt/homebrew/bin', '/usr/local/bin']) {
@@ -246,6 +301,7 @@ const installTerminalHelper = async (browserWindow) => {
       message: `Installed codiff at ${targetPath}.`,
       type: 'info',
     });
+    return true;
   } catch (error) {
     await dialog.showMessageBox(browserWindow ?? undefined, {
       buttons: ['OK'],
@@ -253,6 +309,7 @@ const installTerminalHelper = async (browserWindow) => {
       message: 'Could not install the terminal helper.',
       type: 'error',
     });
+    return false;
   }
 };
 
@@ -392,7 +449,10 @@ const buildApplicationMenu = () =>
     },
   ]);
 
-const createWindow = (repositoryPath, launchOptions = { walkthrough: false }) => {
+const createWindow = (
+  repositoryPath,
+  launchOptions = { repositoryPathProvided: true, walkthrough: false },
+) => {
   const display = screen.getPrimaryDisplay();
   const { height, width } = display.workAreaSize;
   const window = new BrowserWindow({
@@ -491,9 +551,17 @@ ipcMain.handle(
   'codiff:getLaunchOptions',
   (event) =>
     windowLaunchOptions.get(event.sender.id) || {
+      repositoryPathProvided: false,
       walkthrough: false,
     },
 );
+
+ipcMain.handle('codiff:getTerminalHelperStatus', () => getTerminalHelperStatus());
+
+ipcMain.handle('codiff:installTerminalHelper', async (event) => {
+  await installTerminalHelper(BrowserWindow.fromWebContents(event.sender));
+  return getTerminalHelperStatus();
+});
 
 ipcMain.handle('codiff:getWalkthrough', async (event, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();

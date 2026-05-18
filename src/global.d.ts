@@ -9,6 +9,7 @@ import type {
   ReviewAssistantRequest,
   ReviewAssistantResult,
   ReviewSource,
+  TerminalHelperStatus,
   WalkthroughResult,
 } from './types.ts';
 
@@ -22,7 +23,9 @@ declare global {
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getWalkthrough: (source?: ReviewSource) => Promise<WalkthroughResult>;
+      installTerminalHelper: () => Promise<TerminalHelperStatus>;
       onFindInDiffs: (callback: () => void) => () => void;
       onPreferencesChanged: (callback: (preferences: CodiffPreferences) => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;

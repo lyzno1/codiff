@@ -35,6 +35,7 @@ import type {
   ReviewAssistantRequest,
   Walkthrough,
   ReviewSource,
+  TerminalHelperStatus,
 } from './types.ts';
 
 type ReviewAnnotationMetadata = {
@@ -93,9 +94,25 @@ type SourceSession = {
   walkthroughError: string | null;
 };
 
+type RepositoryLoadError = {
+  kind: 'generic' | 'not-a-repository';
+  message: string;
+};
+
 const emptyWalkthroughNotes = new Map<string, WalkthroughNote>();
 
 const HISTORY_PAGE_SIZE = 30;
+
+const defaultLaunchOptions: CodiffLaunchOptions = {
+  repositoryPathProvided: false,
+  walkthrough: false,
+};
+
+const defaultTerminalHelperStatus: TerminalHelperStatus = {
+  command: 'codiff',
+  installed: false,
+  path: '',
+};
 
 registerCustomTheme('Licht', async () => lichtTheme as never);
 registerCustomTheme('Dunkel', async () => dunkelTheme as never);
@@ -116,6 +133,23 @@ const sectionLabel: Record<DiffSection['kind'], string> = {
 
 const getSourceKey = (source: ReviewSource) =>
   source.type === 'commit' ? `commit:${source.ref}` : 'working-tree';
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+export const getRepositoryLoadError = (error: unknown): RepositoryLoadError => {
+  const message = getErrorMessage(error);
+  return /not a git repository/i.test(message)
+    ? {
+        kind: 'not-a-repository',
+        message:
+          'Codiff was opened outside a Git repository. Run `codiff` from inside a repo, or choose File → Open Folder… to open one.',
+      }
+    : {
+        kind: 'generic',
+        message,
+      };
+};
 
 const getShortRef = (ref: string) => ref.slice(0, 7);
 
@@ -2155,6 +2189,55 @@ function RepositoryChangeBanner({ visible }: { visible: boolean }) {
   );
 }
 
+function FirstRunPanel({
+  installing,
+  onInstallTerminalHelper,
+}: {
+  installing: boolean;
+  onInstallTerminalHelper: () => void;
+}) {
+  return (
+    <>
+      <strong>Open a Git repository</strong>
+      <p>
+        Install the terminal helper, then run{' '}
+        <code className="walkthrough-inline-code">codiff</code> from a Git repository in Terminal.
+      </p>
+      <p>
+        You can also choose <span className="empty-panel-menu-path">File → Open Folder…</span> to
+        open a Git repository.
+      </p>
+      <div className="empty-panel-actions">
+        <button disabled={installing} onClick={onInstallTerminalHelper} type="button">
+          {installing ? 'Installing...' : 'Install Terminal Helper'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function RepositoryLoadErrorPanel({ error }: { error: RepositoryLoadError }) {
+  if (error.kind === 'not-a-repository') {
+    return (
+      <>
+        <strong>No Git repository found</strong>
+        <p>
+          Codiff was opened outside a Git repository. Run{' '}
+          <code className="walkthrough-inline-code">codiff</code> from inside a repo, or choose{' '}
+          <span className="empty-panel-menu-path">File → Open Folder…</span> to open one.
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <strong>Unable to read repository</strong>
+      <p>{error.message}</p>
+    </>
+  );
+}
+
 function DiffSearchPanel({
   activeIndex,
   focusRequest,
@@ -2314,7 +2397,7 @@ export default function App() {
   const [diffSearchFocusRequest, setDiffSearchFocusRequest] = useState(0);
   const [diffSearchQuery, setDiffSearchQuery] = useState('');
   const [diffSearchVisible, setDiffSearchVisible] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<RepositoryLoadError | null>(null);
   const [focusCommentId, setFocusCommentId] = useState<string | null>(null);
   const [focusCommentRequest, setFocusCommentRequest] = useState(0);
   const [gitIdentity, setGitIdentity] = useState<GitIdentity | null>(null);
@@ -2324,7 +2407,7 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [itemVersionByPath, setItemVersionByPath] = useState<Record<string, number>>({});
   const [localChangesDetected, setLocalChangesDetected] = useState(false);
-  const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>({ walkthrough: false });
+  const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
   const [preferences, setPreferences] = useState<CodiffPreferences>(defaultPreferences);
   const [reviewComments, setReviewComments] = useState<ReadonlyArray<ReviewComment>>([]);
   const [scrollTarget, setScrollTarget] = useState<{ path: string; request: number } | null>(null);
@@ -2334,6 +2417,10 @@ export default function App() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tree');
   const [state, setState] = useState<RepositoryState | null>(null);
+  const [terminalHelperInstalling, setTerminalHelperInstalling] = useState(false);
+  const [terminalHelperStatus, setTerminalHelperStatus] = useState<TerminalHelperStatus>(
+    defaultTerminalHelperStatus,
+  );
   const [viewed, setViewed] = useState<Record<string, string>>({});
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null);
   const [walkthroughError, setWalkthroughError] = useState<string | null>(null);
@@ -2385,11 +2472,18 @@ export default function App() {
       if (canceled) {
         return;
       }
+      setLaunchOptions(nextLaunchOptions);
 
-      const [nextState, history] = await Promise.all([
-        window.codiff.getRepositoryState(),
-        window.codiff.getRepositoryHistory(HISTORY_PAGE_SIZE),
-      ]);
+      const nextTerminalHelperStatus = await window.codiff
+        .getTerminalHelperStatus()
+        .catch(() => defaultTerminalHelperStatus);
+      if (canceled) {
+        return;
+      }
+      setTerminalHelperStatus(nextTerminalHelperStatus);
+
+      const nextState = await window.codiff.getRepositoryState();
+      const history = await window.codiff.getRepositoryHistory(HISTORY_PAGE_SIZE);
 
       if (canceled) {
         return;
@@ -2443,7 +2537,7 @@ export default function App() {
       setHistoryHasMore(history.entries.length >= HISTORY_PAGE_SIZE);
       setHistoryLimit(HISTORY_PAGE_SIZE);
       setState(orderedState);
-      setError(null);
+      setLoadError(null);
       setCollapsed(
         new Set(
           orderedState.files
@@ -2464,7 +2558,7 @@ export default function App() {
         return;
       }
 
-      setError(error instanceof Error ? error.message : String(error));
+      setLoadError(getRepositoryLoadError(error));
       setWalkthroughLoading(false);
     });
 
@@ -2971,7 +3065,7 @@ export default function App() {
       const request = sourceRequestRef.current + 1;
       sourceRequestRef.current = request;
       setPendingSource(source);
-      setError(null);
+      setLoadError(null);
       setFocusCommentId(null);
       setFocusCommentRequest(0);
       setDiffSearchQuery('');
@@ -3020,7 +3114,7 @@ export default function App() {
         })
         .catch((error: unknown) => {
           if (sourceRequestRef.current === request) {
-            setError(error instanceof Error ? error.message : String(error));
+            setLoadError(getRepositoryLoadError(error));
             setWalkthroughLoading(false);
             setPendingSource(null);
           }
@@ -3320,12 +3414,36 @@ export default function App() {
     [updateCodexReply, walkthroughNotes],
   );
 
-  if (error) {
+  const installTerminalHelper = useCallback(() => {
+    setTerminalHelperInstalling(true);
+    window.codiff
+      .installTerminalHelper()
+      .then((status) => setTerminalHelperStatus(status))
+      .catch(() => {
+        setTerminalHelperStatus(defaultTerminalHelperStatus);
+      })
+      .finally(() => {
+        setTerminalHelperInstalling(false);
+      });
+  }, []);
+
+  if (loadError) {
+    const showFirstRun =
+      loadError.kind === 'not-a-repository' &&
+      !launchOptions.repositoryPathProvided &&
+      !terminalHelperStatus.installed;
+
     return (
       <main className="empty-state">
         <div className="empty-panel squircle">
-          <strong>Unable to read repository</strong>
-          <span>{error}</span>
+          {showFirstRun ? (
+            <FirstRunPanel
+              installing={terminalHelperInstalling}
+              onInstallTerminalHelper={installTerminalHelper}
+            />
+          ) : (
+            <RepositoryLoadErrorPanel error={loadError} />
+          )}
         </div>
       </main>
     );

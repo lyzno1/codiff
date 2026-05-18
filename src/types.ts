@@ -63,8 +63,15 @@ export type RepositoryState = {
 };
 
 export type CodiffLaunchOptions = {
+  repositoryPathProvided: boolean;
   source?: ReviewSource;
   walkthrough: boolean;
+};
+
+export type TerminalHelperStatus = {
+  command: string;
+  installed: boolean;
+  path: string;
 };
 
 export type WalkthroughFile = {

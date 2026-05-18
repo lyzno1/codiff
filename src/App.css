@@ -1334,17 +1334,52 @@
   border: 1px solid var(--file-border);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   max-width: min(560px, 84vw);
   padding: 28px;
   text-align: center;
 }
 
-.empty-panel span {
+.empty-panel p {
   color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
   overflow-wrap: anywhere;
+}
+
+.empty-panel code {
+  color: var(--text);
+}
+
+.empty-panel-menu-path {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.empty-panel-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.empty-panel-actions button {
+  background: var(--text);
+  border: 0;
+  border-radius: 14px;
+  color: var(--app-bg);
+  corner-shape: squircle;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.empty-panel-actions button:disabled {
+  cursor: default;
+  opacity: 0.58;
 }
 
 @media (max-width: 880px) {

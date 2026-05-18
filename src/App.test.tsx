@@ -3,6 +3,7 @@ import {
   buildReviewCommentsMarkdown,
   fileHasVisibleDiff,
   getDiffSearchResult,
+  getRepositoryLoadError,
   getVisibleDiffSections,
   isDiffSearchShortcut,
   shouldDiscardReviewCommentOnEscape,
@@ -124,6 +125,18 @@ test('diff search shortcut does not claim fullscreen shortcut', () => {
   expect(isDiffSearchShortcut({ ...baseEvent, ctrlKey: false, metaKey: true }, 'Win32')).toBe(
     false,
   );
+});
+
+test('repository load errors hide raw git output for non-repositories', () => {
+  const error = getRepositoryLoadError(
+    new Error('Command failed: git -C /tmp rev-parse --show-toplevel fatal: not a git repository'),
+  );
+
+  expect(error).toEqual({
+    kind: 'not-a-repository',
+    message:
+      'Codiff was opened outside a Git repository. Run `codiff` from inside a repo, or choose File → Open Folder… to open one.',
+  });
 });
 
 test('review comment markdown includes file and patch context', () => {

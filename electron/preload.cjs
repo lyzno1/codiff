@@ -8,7 +8,9 @@ contextBridge.exposeInMainWorld('codiff', {
   getPreferences: () => ipcRenderer.invoke('codiff:getPreferences'),
   getRepositoryHistory: (limit) => ipcRenderer.invoke('codiff:getRepositoryHistory', limit),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
+  getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),
+  installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),
   onFindInDiffs: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('codiff:findInDiffs', listener);
