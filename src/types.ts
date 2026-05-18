@@ -63,6 +63,7 @@ export type RepositoryState = {
 };
 
 export type CodiffLaunchOptions = {
+  source?: ReviewSource;
   walkthrough: boolean;
 };
 

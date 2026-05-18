@@ -16,6 +16,7 @@ done
 script_dir="$(CDPATH= cd -P "$(dirname "$source_path")" >/dev/null 2>&1 && pwd)"
 app_path="$(CDPATH= cd -P "$script_dir/../../../.." >/dev/null 2>&1 && pwd)"
 repository_path=""
+commit_ref=""
 walkthrough=0
 
 for arg in "$@"; do
@@ -26,7 +27,9 @@ for arg in "$@"; do
     -*)
       ;;
     *)
-      if [ -z "$repository_path" ]; then
+      if [ -z "$commit_ref" ] && printf '%s' "$arg" | grep -Eq '^[0-9a-fA-F]{4,64}$' && [ ! -e "$arg" ]; then
+        commit_ref="$arg"
+      elif [ -z "$repository_path" ]; then
         repository_path="$arg"
       fi
       ;;
@@ -35,7 +38,11 @@ done
 
 repository_path="${repository_path:-$PWD}"
 
-if [ "$walkthrough" -eq 1 ]; then
+if [ -n "$commit_ref" ] && [ "$walkthrough" -eq 1 ]; then
+  open -n "$app_path" --args --walkthrough --commit "$commit_ref" "$repository_path"
+elif [ -n "$commit_ref" ]; then
+  open -n "$app_path" --args --commit "$commit_ref" "$repository_path"
+elif [ "$walkthrough" -eq 1 ]; then
   open -n "$app_path" --args --walkthrough "$repository_path"
 else
   open -n "$app_path" --args "$repository_path"

@@ -28,10 +28,17 @@ Run it from any Git repository, or pass a path:
 codiff /path/to/repository
 ```
 
+Review a specific commit:
+
+```bash
+codiff a1b2c3d
+```
+
 Start with an LLM-generated walkthrough order:
 
 ```bash
 codiff -w
+codiff -w a1b2c3d
 ```
 
 Launching Codiff in multiple repositories opens a separate native window for each repository.

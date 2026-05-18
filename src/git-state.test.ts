@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import type { DiffSection, DiffSectionContentRequest, RepositoryState } from './types.ts';
+import type {
+  DiffSection,
+  DiffSectionContentRequest,
+  RepositoryState,
+  ReviewSource,
+} from './types.ts';
 
 type StatusEntry = {
   oldPath?: string;
@@ -25,7 +30,7 @@ type GitStateModule = {
   readRepositoryChangeSignature: (
     launchPath: string,
   ) => Promise<{ root: string; signature: string }>;
-  readRepositoryState: (launchPath: string) => Promise<RepositoryState>;
+  readRepositoryState: (launchPath: string, source?: ReviewSource) => Promise<RepositoryState>;
   readWorkingTreeState: (launchPath: string) => Promise<RepositoryState>;
 };
 
@@ -328,6 +333,33 @@ test('readRepositoryChangeSignature changes for untracked content edits', async 
     const after = await readRepositoryChangeSignature(repo);
 
     expect(after.signature).not.toBe(before.signature);
+  });
+});
+
+test('readRepositoryState reads commit diffs from short hashes', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'one\n');
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, 'file.txt', 'two\n');
+    await writeRepoFile(repo, 'new.txt', 'created\n');
+    await commitAll(repo, 'second commit');
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    const shortCommit = commit.slice(0, 8);
+
+    const state = await readRepositoryState(repo, {
+      ref: shortCommit,
+      type: 'commit',
+    });
+
+    expect(state.source).toEqual({
+      ref: commit,
+      type: 'commit',
+    });
+    expect(state.files.map((file) => file.path).sort()).toEqual(['file.txt', 'new.txt']);
+    expect(state.files.every((file) => file.sections[0]?.kind === 'commit')).toBe(true);
+    expect(state.files.find((file) => file.path === 'file.txt')?.sections[0].patch).toContain(
+      '+two',
+    );
   });
 });
 

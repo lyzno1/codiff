@@ -11,6 +11,7 @@ const {
 } = require('node:fs');
 const { dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { parseArgs } = require('node:util');
 const {
   app,
   BrowserWindow,
@@ -40,20 +41,61 @@ let preferences = {
   showWhitespace: false,
 };
 
-const getCommandLineRepositoryPath = (commandLine = process.argv) => {
-  const args = commandLine.slice(process.defaultApp ? 2 : 1);
-  return args.find((arg) => arg && !arg.startsWith('-'));
-};
+const commitHashPattern = /^[0-9a-f]{4,64}$/i;
 
-const getCommandLineLaunchOptions = (commandLine = process.argv) => {
+const isCommitHashArgument = (arg) => commitHashPattern.test(arg) && !existsSync(resolve(arg));
+
+const parseCommandLineArguments = (commandLine = process.argv) => {
   const args = commandLine.slice(process.defaultApp ? 2 : 1);
+  const useEnvironment = commandLine === process.argv;
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args,
+    options: {
+      commit: {
+        type: 'string',
+      },
+      walkthrough: {
+        short: 'w',
+        type: 'boolean',
+      },
+    },
+    strict: false,
+  });
+
+  let commitRef = typeof values.commit === 'string' ? values.commit : null;
+  let repositoryPath = null;
+
+  for (const arg of positionals) {
+    if (!commitRef && isCommitHashArgument(arg)) {
+      commitRef = arg;
+    } else if (repositoryPath == null) {
+      repositoryPath = arg;
+    }
+  }
+
+  const envCommitRef = useEnvironment ? process.env.CODIFF_COMMIT_REF || '' : '';
+  const sourceRef = envCommitRef || commitRef;
   return {
-    walkthrough:
-      process.env.CODIFF_WALKTHROUGH === '1' ||
-      args.includes('--walkthrough') ||
-      args.includes('-w'),
+    launchOptions: {
+      source: sourceRef
+        ? {
+            ref: sourceRef,
+            type: 'commit',
+          }
+        : undefined,
+      walkthrough:
+        (useEnvironment && process.env.CODIFF_WALKTHROUGH === '1') || values.walkthrough === true,
+    },
+    repositoryPath,
   };
 };
+
+const getCommandLineRepositoryPath = (commandLine = process.argv) =>
+  parseCommandLineArguments(commandLine).repositoryPath;
+
+const getCommandLineLaunchOptions = (commandLine = process.argv) =>
+  parseCommandLineArguments(commandLine).launchOptions;
 
 const getLaunchPath = () =>
   resolve(process.env.CODIFF_REPOSITORY_PATH || getCommandLineRepositoryPath() || process.cwd());
@@ -318,7 +360,9 @@ const createWindow = (repositoryPath, launchOptions = { walkthrough: false }) =>
   const webContentsId = window.webContents.id;
   windowRepositories.set(webContentsId, repositoryPath);
   windowLaunchOptions.set(webContentsId, launchOptions);
-  startRepositoryWatcher(window, repositoryPath);
+  if (!launchOptions.source) {
+    startRepositoryWatcher(window, repositoryPath);
+  }
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => {
     const watcher = repositoryWatchers.get(webContentsId);
@@ -380,7 +424,8 @@ if (squirrelStartup || !lock) {
 
 ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const state = await readRepositoryState(repositoryPath, source);
+  const launchOptions = windowLaunchOptions.get(event.sender.id);
+  const state = await readRepositoryState(repositoryPath, source || launchOptions?.source);
   await resetRepositoryWatcher(event.sender.id, repositoryPath);
   return state;
 });
@@ -395,7 +440,8 @@ ipcMain.handle(
 
 ipcMain.handle('codiff:getWalkthrough', async (event, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const state = await readRepositoryState(repositoryPath, source);
+  const launchOptions = windowLaunchOptions.get(event.sender.id);
+  const state = await readRepositoryState(repositoryPath, source || launchOptions?.source);
   return readWalkthrough(state);
 });
 
