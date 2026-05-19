@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -88,5 +88,42 @@ test('resolvePullRequestUrl builds GitHub PR URLs from the origin remote', async
     );
   } finally {
     await rm(repositoryPath, { force: true, recursive: true });
+  }
+});
+
+test('packaged terminal helper forwards --commit HEAD to Electron', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-app-helper-'));
+  const fakeBin = join(directory, 'bin');
+  const logPath = join(directory, 'open-args.txt');
+  const repositoryPath = join(directory, 'repo');
+  const openPath = join(fakeBin, 'open');
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(repositoryPath);
+    await writeFile(
+      openPath,
+      '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n',
+    );
+    await chmod(openPath, 0o755);
+
+    await execFileAsync(resolve('bin/codiff-app'), ['--commit', 'HEAD', repositoryPath], {
+      env: {
+        ...process.env,
+        OPEN_ARGS_FILE: logPath,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+      },
+    });
+
+    expect((await readFile(logPath, 'utf8')).trim().split('\n')).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--commit',
+      'HEAD',
+      repositoryPath,
+    ]);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
   }
 });

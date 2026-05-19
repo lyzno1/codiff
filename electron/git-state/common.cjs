@@ -20,8 +20,8 @@ const execFileAsync = promisify(execFile);
  * @typedef {import('../src/types.ts').SubmitPullRequestReviewRequest} SubmitPullRequestReviewRequest
  * @typedef {'staged' | 'unstaged'} WorkingTreeSectionKind
  * @typedef {{cacheKey: string; contents: string; name: string}} TextFile
- * @typedef {{reason: string; canLoad?: boolean; fileCount?: number; limit?: number; loadState?: DiffSection['loadState']; size?: number}} DiffSummary
- * @typedef {{binary: boolean; file?: TextFile; loadState?: DiffSection['loadState']; summary?: DiffSummary}} FileContentResult
+ * @typedef {{reason: string; canLoad?: boolean; fileCount?: number; fingerprint?: string; limit?: number; loadState?: DiffSection['loadState']; size?: number}} DiffSummary
+ * @typedef {{binary: boolean; file?: TextFile; fingerprint?: string; loadState?: DiffSection['loadState']; summary?: DiffSummary}} FileContentResult
  * @typedef {{
  *   directory?: boolean;
  *   oldPath?: string;
@@ -236,10 +236,18 @@ const getBlobSize = async (repoRoot, spec) => {
 
 /** @param {string} name @param {Buffer} buffer @param {string} cacheKey @returns {FileContentResult} */
 const bufferToTextFile = (name, buffer, cacheKey) => {
+  const fingerprint = getFingerprint(buffer);
+
   if (isBinaryBuffer(buffer)) {
     return {
       binary: true,
+      fingerprint,
       file: undefined,
+      summary: createSummary('Binary file changed.', {
+        canLoad: false,
+        fingerprint,
+        size: buffer.length,
+      }),
     };
   }
 
@@ -475,13 +483,20 @@ const getPatch = async (repoRoot, path, kind) => {
 
 /** @param {...FileContentResult} results @returns {{binary: boolean; loadState: DiffSection['loadState']; summary?: DiffSummary}} */
 const summarizeContent = (...results) => {
-  const binary = results.some((result) => result.binary);
-  if (binary) {
+  const binaryResults = results.filter((result) => result.binary);
+  if (binaryResults.length > 0) {
+    const fingerprint = getFingerprint(
+      binaryResults
+        .map((result) => `${result.fingerprint || ''}\0${result.summary?.size || ''}`)
+        .join('\0'),
+    );
+
     return {
       binary: true,
       loadState: 'binary',
       summary: createSummary('Binary file changed.', {
         canLoad: false,
+        fingerprint,
       }),
     };
   }

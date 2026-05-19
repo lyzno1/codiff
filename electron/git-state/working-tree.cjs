@@ -121,7 +121,7 @@ const readWorkingTreeState = async (launchPath) => {
           (section) =>
             `${section.loadState || 'ready'}\n${section.binary ? 'binary' : 'text'}\n${
               section.patch
-            }\n${section.summary?.reason || ''}\n${
+            }\n${section.summary?.reason || ''}\n${section.summary?.fingerprint || ''}\n${
               section.oldFile?.contents || ''
             }\n${section.newFile?.contents || ''}`,
         )

@@ -18,10 +18,17 @@ app_path="$(CDPATH= cd -P "$script_dir/../../../.." >/dev/null 2>&1 && pwd)"
 repository_path=""
 commit_ref=""
 pull_request_source=""
+expect_commit_ref=0
 expect_pull_request_number=0
 walkthrough=0
 
 for arg in "$@"; do
+  if [ "$expect_commit_ref" -eq 1 ]; then
+    commit_ref="$arg"
+    expect_commit_ref=0
+    continue
+  fi
+
   if [ "$expect_pull_request_number" -eq 1 ]; then
     if printf '%s' "$arg" | grep -Eq '^[1-9][0-9]*$'; then
       pull_request_source="#$arg"
@@ -34,6 +41,12 @@ for arg in "$@"; do
   case "$arg" in
     --walkthrough|-w)
       walkthrough=1
+      ;;
+    --commit)
+      expect_commit_ref=1
+      ;;
+    --commit=*)
+      commit_ref="${arg#--commit=}"
       ;;
     -*)
       ;;

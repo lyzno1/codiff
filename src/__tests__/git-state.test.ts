@@ -22,6 +22,10 @@ type StatusEntry = {
 };
 
 type GitStateModule = {
+  listRepositoryHistory: (
+    launchPath: string,
+    limit?: number,
+  ) => Promise<{ entries: ReadonlyArray<unknown>; root: string }>;
   normalizeGitHubReviewComment: (comment: Record<string, unknown>) => unknown;
   normalizePullRequestComment: (comment: Record<string, unknown>) => Record<string, unknown>;
   parseGitHubPullRequestUrl: (value: string) => {
@@ -45,6 +49,7 @@ type GitStateModule = {
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const {
+  listRepositoryHistory,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
@@ -190,6 +195,24 @@ test('readWorkingTreeState separates staged and unstaged modifications', async (
     expect(state.files[0].sections[0].newFile?.contents).toBe('two\n');
     expect(state.files[0].sections[1].oldFile?.contents).toBe('two\n');
     expect(state.files[0].sections[1].newFile?.contents).toBe('three\n');
+  });
+});
+
+test('readRepositoryState and history handle fresh repositories', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'notes/todo.txt', 'write tests\n');
+
+    const [state, history] = await Promise.all([
+      readRepositoryState(repo),
+      listRepositoryHistory(repo),
+    ]);
+
+    expect(history).toEqual({
+      entries: [],
+      root: repo,
+    });
+    expect(state.root).toBe(repo);
+    expect(state.files.map((file) => file.path)).toEqual(['notes/todo.txt']);
   });
 });
 
@@ -418,6 +441,32 @@ test('readRepositoryChangeSignature changes for untracked content edits', async 
   });
 });
 
+test('readRepositoryChangeSignature changes for edits inside untracked directories', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'nested/file.txt', 'one\n');
+
+    const before = await readRepositoryChangeSignature(repo);
+    await writeRepoFile(repo, 'nested/file.txt', 'two changed\n');
+    const after = await readRepositoryChangeSignature(repo);
+
+    expect(after.signature).not.toBe(before.signature);
+  });
+});
+
+test('readWorkingTreeState changes binary fingerprints when binary contents change', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'raw.bin', Uint8Array.from([0, 1, 2, 3]));
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, 'raw.bin', Uint8Array.from([0, 9, 2, 3]));
+
+    const before = await readWorkingTreeState(repo);
+    await writeRepoFile(repo, 'raw.bin', Uint8Array.from([0, 8, 2, 3]));
+    const after = await readWorkingTreeState(repo);
+
+    expect(after.files[0].fingerprint).not.toBe(before.files[0].fingerprint);
+  });
+});
+
 test('readRepositoryChangeSignature ignores staging and unstaging untracked files', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'file.txt', 'one\n');
@@ -489,6 +538,51 @@ test('readRepositoryState reads commit diffs from short hashes', async () => {
     expect(state.files.find((file) => file.path === 'file.txt')?.sections[0].patch).toContain(
       '+two',
     );
+  });
+});
+
+test('readRepositoryState reads merge commits against the first parent', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'base.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    const baseBranch = (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+
+    await git(repo, ['checkout', '-b', 'feature']);
+    await writeRepoFile(repo, 'feature.txt', 'feature\n');
+    await commitAll(repo, 'feature commit');
+    await git(repo, ['checkout', baseBranch]);
+    await git(repo, ['merge', '--no-ff', 'feature', '-m', 'merge feature']);
+
+    const mergeCommit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    const state = await readRepositoryState(repo, {
+      ref: mergeCommit,
+      type: 'commit',
+    });
+
+    expect(state.files.map((file) => file.path)).toEqual(['feature.txt']);
+    expect(state.files[0].sections[0].oldFile?.contents).toBe('');
+    expect(state.files[0].sections[0].newFile?.contents).toBe('feature\n');
+    expect(state.files[0].sections[0].patch).toContain('+feature');
+  });
+});
+
+test('readRepositoryState summarizes committed files over the manual text limit', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'base.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, 'huge.txt', 'x'.repeat(2 * 1024 * 1024 + 1));
+    await commitAll(repo, 'large commit');
+
+    const state = await readRepositoryState(repo, {
+      ref: 'HEAD',
+      type: 'commit',
+    });
+    const section = state.files.find((file) => file.path === 'huge.txt')?.sections[0];
+
+    expect(section?.loadState).toBe('too-large');
+    expect(section?.summary?.canLoad).toBe(false);
+    expect(section?.newFile).toBeUndefined();
+    expect(section?.patch).toBe('');
   });
 });
 

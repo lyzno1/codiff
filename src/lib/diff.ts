@@ -157,6 +157,7 @@ const getSectionCacheIdentity = (section: DiffSection) =>
   [
     section.loadState ?? 'ready',
     section.summary?.reason ?? '',
+    section.summary?.fingerprint ?? '',
     section.oldFile?.cacheKey ?? '',
     section.newFile?.cacheKey ?? '',
     section.patch.length,
@@ -203,8 +204,11 @@ export const parseSectionDiffWithOptions = (
   return fileDiff;
 };
 
-const fileHasMetadataDiff = (file: ChangedFile) =>
-  file.status === 'renamed' && file.oldPath != null && file.oldPath !== file.path;
+const modeMetadataPattern = /^(?:old mode|new mode|new file mode|deleted file mode) /m;
+
+const fileHasMetadataDiff = (file: ChangedFile, section: DiffSection) =>
+  modeMetadataPattern.test(section.patch) ||
+  (file.status === 'renamed' && file.oldPath != null && file.oldPath !== file.path);
 
 const sectionHasVisibleDiff = (
   file: ChangedFile,
@@ -213,7 +217,7 @@ const sectionHasVisibleDiff = (
 ) =>
   section.binary ||
   (section.loadState != null && section.loadState !== 'ready') ||
-  fileHasMetadataDiff(file) ||
+  fileHasMetadataDiff(file, section) ||
   fileDiff.hunks.length > 0;
 
 export const getVisibleDiffSections = (file: ChangedFile, showWhitespace: boolean) =>

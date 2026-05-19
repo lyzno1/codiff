@@ -1,6 +1,13 @@
 // @ts-check
 
-const { fileSort, getFingerprint, git, normalizeStatus, readGitFile } = require('./common.cjs');
+const {
+  fileSort,
+  getFingerprint,
+  git,
+  normalizeStatus,
+  readGitFile,
+  summarizeContent,
+} = require('./common.cjs');
 
 /**
  * @typedef {import('../../src/types.ts').ChangedFile} ChangedFile
@@ -38,42 +45,67 @@ const parseCommitNameStatus = (raw) => {
   return files.sort(fileSort);
 };
 
+/** @param {string} path */
+const createEmptyFileContent = (path) => ({
+  binary: false,
+  file: {
+    cacheKey: `empty:${path}`,
+    contents: '',
+    name: path,
+  },
+});
+
+/** @param {string} repoRoot @param {string} commit @returns {Promise<Array<string>>} */
+const readCommitParents = async (repoRoot, commit) => {
+  const raw = (await git(repoRoot, ['rev-list', '--parents', '-n', '1', commit])).trim();
+  return raw ? raw.split(' ').slice(1) : [];
+};
+
+/** @param {string} repoRoot @param {string} commit @param {string | undefined} firstParent */
+const readCommitNameStatus = async (repoRoot, commit, firstParent) =>
+  parseCommitNameStatus(
+    await git(
+      repoRoot,
+      firstParent
+        ? ['diff', '--name-status', '-r', '-z', '-M', firstParent, commit]
+        : ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '--root', '-M', commit],
+    ),
+  );
+
+/** @param {string} repoRoot @param {string} commit @param {string | undefined} firstParent @param {string} path */
+const readCommitPatch = (repoRoot, commit, firstParent, path) =>
+  git(
+    repoRoot,
+    firstParent
+      ? ['diff', '--patch', '--no-ext-diff', '--find-renames', firstParent, commit, '--', path]
+      : ['show', '--format=', '--patch', '--no-ext-diff', '--find-renames', commit, '--', path],
+  );
+
 /** @param {string} launchPath @param {string} ref @returns {Promise<RepositoryState>} */
 const readCommitState = async (launchPath, ref) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const commit = (await git(repoRoot, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
-  const status = parseCommitNameStatus(
-    await git(repoRoot, [
-      'diff-tree',
-      '--no-commit-id',
-      '--name-status',
-      '-r',
-      '-z',
-      '--root',
-      '-M',
-      commit,
-    ]),
-  );
+  const [firstParent] = await readCommitParents(repoRoot, commit);
+  const status = await readCommitNameStatus(repoRoot, commit, firstParent);
   /** @type {Array<ChangedFile>} */
   const files = [];
 
   for (const item of status) {
-    const patch = await git(repoRoot, [
-      'show',
-      '--format=',
-      '--patch',
-      '--no-ext-diff',
-      '--find-renames',
-      commit,
-      '--',
-      item.path,
-    ]);
-    const oldFile = await readGitFile(repoRoot, `${commit}^`, item.oldPath || item.path);
-    const newFile = await readGitFile(repoRoot, commit, item.path);
+    const oldFile = firstParent
+      ? await readGitFile(repoRoot, firstParent, item.oldPath || item.path, { force: true })
+      : createEmptyFileContent(item.oldPath || item.path);
+    const newFile = await readGitFile(repoRoot, commit, item.path, { force: true });
+    const summary = summarizeContent(oldFile, newFile);
+    const patch =
+      summary.loadState === 'ready'
+        ? await readCommitPatch(repoRoot, commit, firstParent, item.path)
+        : '';
 
     files.push({
       fingerprint: getFingerprint(
-        `${commit}\n${item.oldPath || ''}\n${patch}\n${oldFile.file?.contents || ''}\n${
+        `${commit}\n${item.status}\n${item.oldPath || ''}\n${summary.loadState || 'ready'}\n${
+          summary.summary?.reason || ''
+        }\n${summary.summary?.fingerprint || ''}\n${patch}\n${oldFile.file?.contents || ''}\n${
           newFile.file?.contents || ''
         }`,
       ),
@@ -81,12 +113,14 @@ const readCommitState = async (launchPath, ref) => {
       path: item.path,
       sections: [
         {
-          binary: /Binary files .* differ/.test(patch) || oldFile.binary || newFile.binary,
+          binary: summary.binary || /Binary files .* differ/.test(patch),
           id: `${item.path}:${commit}`,
           kind: 'commit',
+          loadState: summary.loadState,
           newFile: newFile.file,
           oldFile: oldFile.file,
           patch,
+          summary: summary.summary,
         },
       ],
       status: item.status,
@@ -116,6 +150,15 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
 /** @param {string} launchPath @param {number} [limit] */
 const listRepositoryHistory = async (launchPath, limit = 200) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  try {
+    await git(repoRoot, ['rev-parse', '--verify', 'HEAD']);
+  } catch {
+    return {
+      entries: [],
+      root: repoRoot,
+    };
+  }
+
   const raw = await git(repoRoot, [
     'log',
     `--max-count=${limit}`,

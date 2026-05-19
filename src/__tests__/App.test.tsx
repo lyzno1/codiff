@@ -60,6 +60,36 @@ test('pure renames are visible without content hunks', () => {
   expect(fileHasVisibleDiff(file, false)).toBe(true);
 });
 
+test('mode-only changes are visible without content hunks', () => {
+  const file = {
+    fingerprint: 'mode-only',
+    path: 'script.sh',
+    sections: [
+      {
+        binary: false,
+        id: 'script.sh:unstaged',
+        kind: 'unstaged',
+        newFile: {
+          contents: '#!/bin/sh\necho hi\n',
+          name: 'script.sh',
+        },
+        oldFile: {
+          contents: '#!/bin/sh\necho hi\n',
+          name: 'script.sh',
+        },
+        patch: 'diff --git a/script.sh b/script.sh\nold mode 100644\nnew mode 100755\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  const visibleSections = getVisibleDiffSections(file, false);
+
+  expect(visibleSections).toHaveLength(1);
+  expect(visibleSections[0].fileDiff.hunks).toHaveLength(0);
+  expect(fileHasVisibleDiff(file, false)).toBe(true);
+});
+
 test('diff search finds content matches across sides', () => {
   const file = {
     fingerprint: 'content-search',

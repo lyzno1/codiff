@@ -17,6 +17,7 @@ export type DiffSection = {
   summary?: {
     canLoad?: boolean;
     fileCount?: number;
+    fingerprint?: string;
     limit?: number;
     reason: string;
     size?: number;
