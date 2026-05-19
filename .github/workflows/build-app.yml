@@ -5,6 +5,9 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: write
+
 env:
   ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -66,9 +69,26 @@ jobs:
           pnpm exec electron-forge make --platform=win32 --arch=x64
           test -d ./out
 
-      - name: Upload Artifacts to GitHub
-        uses: actions/upload-artifact@v4
-        with:
-          if-no-files-found: error
-          name: native-apps
-          path: ${{ github.workspace }}/out
+      - name: Attach Native Apps to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          shopt -s nullglob
+
+          assets=(
+            "${GITHUB_WORKSPACE}"/out/make/deb/x64/*.deb
+            "${GITHUB_WORKSPACE}"/out/make/rpm/x64/*.rpm
+            "${GITHUB_WORKSPACE}"/out/make/zip/win32/x64/*.zip
+          )
+
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            find "${GITHUB_WORKSPACE}/out" -type f
+            exit 1
+          fi
+
+          gh release view "${TAG_NAME}" >/dev/null 2>&1 \
+            || gh release create "${TAG_NAME}" --generate-notes --title "${TAG_NAME}" --verify-tag
+
+          gh release upload "${TAG_NAME}" "${assets[@]}" --clobber
