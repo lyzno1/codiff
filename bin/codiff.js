@@ -29,6 +29,7 @@ const run = () => {
   }
 
   const child = spawn(electron, [root], {
+    detached: true,
     env: {
       ...process.env,
       CODIFF_COMMIT_REF: commitRef ?? '',
@@ -36,17 +37,10 @@ const run = () => {
       CODIFF_REPOSITORY_PATH: requestedPath,
       CODIFF_WALKTHROUGH: walkthrough ? '1' : '',
     },
-    stdio: 'inherit',
+    stdio: 'ignore',
   });
 
-  child.on('exit', (code, signal) => {
-    if (signal) {
-      process.kill(process.pid, signal);
-      return;
-    }
-
-    process.exit(code ?? 0);
-  });
+  child.unref();
 };
 
 run();
