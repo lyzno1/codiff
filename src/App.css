@@ -295,6 +295,7 @@
   min-height: 0;
   overflow: hidden;
   position: relative;
+  border-radius: 18px;
 }
 
 .sidebar-header {
@@ -693,7 +694,8 @@
   display: grid;
   gap: 10px;
   height: 54px;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
+  min-width: 0;
   padding: 9px 10px;
   transition: border-radius 120ms ease;
 }
@@ -747,6 +749,7 @@
   grid-template-columns: 30px minmax(0, 1fr) auto;
   justify-content: stretch;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
   text-align: left;
 }
@@ -786,6 +789,7 @@
 
 .codiff-file-heading {
   min-width: 0;
+  overflow: hidden;
 }
 
 .codiff-file-path,
@@ -832,6 +836,7 @@
   background: rgb(127 127 127 / 0.11);
   color: var(--muted);
   padding: 5px 9px;
+  white-space: nowrap;
 }
 
 .codiff-status-badge.added,
@@ -852,9 +857,11 @@
 .codiff-open-button,
 .codiff-viewed-button {
   border: 1px solid rgb(127 127 127 / 0.18);
+  flex: none;
   gap: 7px;
   min-height: 30px;
   padding: 0 12px;
+  white-space: nowrap;
 }
 
 .codiff-open-button {
@@ -920,6 +927,7 @@
 
 .review-comment-thread {
   --review-comment-radius: 12px;
+  --review-avatar-radius: 24px;
 
   display: flex;
   flex-direction: column;
@@ -943,8 +951,8 @@
 .review-comment-avatar {
   align-self: start;
   background: rgb(127 127 127 / 0.14);
-  border: 1px solid var(--file-border);
-  border-radius: var(--review-comment-radius);
+  margin-top: 1px;
+  border-radius: var(--review-avatar-radius);
   color: var(--muted);
   corner-shape: squircle;
   display: inline-flex;
@@ -1493,11 +1501,8 @@
   }
 
   .codiff-file-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .codiff-section-badge,
-  .codiff-status-badge {
-    display: none;
+    gap: 7px;
+    grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
+    padding-inline: 8px;
   }
 }

@@ -415,8 +415,9 @@ const codeViewUnsafeCSS = `
     border-radius: 3px;
     box-shadow: 0 7px 18px -14px rgb(0 0 0 / 0.72);
     color: var(--diffs-modified-base);
-    height: calc(1lh - 2px);
-    width: calc(1lh - 2px);
+    height: calc(1lh - 4px);
+    transform: translate(-3px, 2px);
+    width: calc(1lh - 4px);
   }
 `;
 
@@ -3839,7 +3840,7 @@ export default function App() {
           ) : null}
         </div>
       ) : null}
-      <aside className="sidebar squircle">
+      <aside className="squircle sidebar">
         <div className="sidebar-header">
           <div className="sidebar-path-row">
             <div className="sidebar-path" title={state.root}>
