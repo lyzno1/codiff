@@ -1,7 +1,17 @@
+// @ts-check
+
 const { execFileSync } = require('node:child_process');
 const { realpathSync } = require('node:fs');
 const { resolve } = require('node:path');
 
+/**
+ * @typedef {import('../src/types.ts').ReviewSource} ReviewSource
+ * @typedef {import('../src/types.ts').CodiffLaunchOptions} CodiffLaunchOptions
+ * @typedef {{key: string; repositoryRoot: string; sourceKey: string}} WindowIdentity
+ * @typedef {{number: number; owner: string; repo: string}} ParsedPullRequest
+ */
+
+/** @param {string} path */
 const getRealPath = (path) => {
   try {
     return realpathSync(path);
@@ -10,6 +20,7 @@ const getRealPath = (path) => {
   }
 };
 
+/** @param {string} repositoryPath */
 const resolveRepositoryRoot = (repositoryPath) => {
   const resolvedPath = resolve(repositoryPath);
 
@@ -24,6 +35,7 @@ const resolveRepositoryRoot = (repositoryPath) => {
   }
 };
 
+/** @param {string} repositoryRoot @param {string} ref */
 const resolveCommitRef = (repositoryRoot, ref) => {
   try {
     return execFileSync('git', ['-C', repositoryRoot, 'rev-parse', '--verify', `${ref}^{commit}`], {
@@ -36,6 +48,7 @@ const resolveCommitRef = (repositoryRoot, ref) => {
   }
 };
 
+/** @param {string} value @returns {ParsedPullRequest | null} */
 const parseGitHubPullRequestUrl = (value) => {
   try {
     const url = new URL(value);
@@ -56,6 +69,7 @@ const parseGitHubPullRequestUrl = (value) => {
   }
 };
 
+/** @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
 const getPullRequestSourceKey = (source) => {
   const pullRequest =
     source.owner && source.repo && source.number
@@ -73,6 +87,7 @@ const getPullRequestSourceKey = (source) => {
     : null;
 };
 
+/** @param {string} repositoryRoot @param {ReviewSource} [source] */
 const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   if (source.type === 'working-tree') {
     return 'working-tree';
@@ -90,6 +105,7 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   return null;
 };
 
+/** @param {string} repositoryPath @param {Partial<CodiffLaunchOptions>} [launchOptions] */
 const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
   const repositoryRoot = resolveRepositoryRoot(repositoryPath);
   const sourceKey = getSourceKey(repositoryRoot, launchOptions.source);
@@ -102,9 +118,14 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
     : null;
 };
 
+/** @param {string} repositoryPath @param {ReviewSource} source */
 const getWindowIdentityForSource = (repositoryPath, source) =>
   getWindowIdentity(repositoryPath, { source });
 
+/**
+ * @param {WindowIdentity | null} identity
+ * @param {ReadonlyMap<number, WindowIdentity | null>} existingIdentities
+ */
 const findMatchingWindowIdentity = (identity, existingIdentities) => {
   if (!identity) {
     return null;

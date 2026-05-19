@@ -1,6 +1,9 @@
+// @ts-check
+
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('codiff', {
+/** @type {Window['codiff']} */
+const codiff = {
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
   getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
@@ -12,6 +15,7 @@ contextBridge.exposeInMainWorld('codiff', {
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),
   installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),
   onCopyPendingCommentsRequest: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {number} requestId */
     const listener = (_event, requestId) => {
       Promise.resolve(callback()).then(
         (markdown) => {
@@ -35,11 +39,13 @@ contextBridge.exposeInMainWorld('codiff', {
     return () => ipcRenderer.removeListener('codiff:findInDiffs', listener);
   },
   onPreferencesChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../src/types.ts').CodiffPreferences} preferences */
     const listener = (_event, preferences) => callback(preferences);
     ipcRenderer.on('codiff:preferencesChanged', listener);
     return () => ipcRenderer.removeListener('codiff:preferencesChanged', listener);
   },
   onRepositoryChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {{root: string}} change */
     const listener = (_event, change) => callback(change);
     ipcRenderer.on('codiff:repositoryChanged', listener);
     return () => ipcRenderer.removeListener('codiff:repositoryChanged', listener);
@@ -50,4 +56,6 @@ contextBridge.exposeInMainWorld('codiff', {
     ipcRenderer.invoke('codiff:submitPullRequestComment', request),
   submitPullRequestReview: (request) =>
     ipcRenderer.invoke('codiff:submitPullRequestReview', request),
-});
+};
+
+contextBridge.exposeInMainWorld('codiff', codiff);

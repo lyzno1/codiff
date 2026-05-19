@@ -1,7 +1,16 @@
+// @ts-check
+
 const { parseJSONMessage, runCodex, truncate } = require('./codex.cjs');
 
 const MAX_PATCH_CHARS = 24_000;
 const MAX_OTHER_FILES = 40;
+
+/**
+ * @typedef {import('../src/types.ts').ChangedFile} ChangedFile
+ * @typedef {import('../src/types.ts').RepositoryState} RepositoryState
+ * @typedef {import('../src/types.ts').ReviewAssistantRequest} ReviewAssistantRequest
+ * @typedef {{model?: string; fallbackModel?: string; onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void}} CodexOptions
+ */
 
 const reviewAssistantSchema = {
   additionalProperties: false,
@@ -13,6 +22,7 @@ const reviewAssistantSchema = {
   type: 'object',
 };
 
+/** @param {ChangedFile} file */
 const getFileDigest = (file) => ({
   oldPath: file.oldPath,
   path: file.path,
@@ -22,7 +32,9 @@ const getFileDigest = (file) => ({
     .filter((summary) => typeof summary === 'string' && summary.trim()),
 });
 
+/** @param {RepositoryState} state @param {Partial<ReviewAssistantRequest> | null | undefined} request */
 const buildReviewAssistantInput = (state, request) => {
+  /** @type {Partial<ReviewAssistantRequest['comment']>} */
   const comment = request?.comment ?? {};
   const file = state.files.find((candidate) => candidate.path === comment.filePath);
   const section = file?.sections.find((candidate) => candidate.id === comment.sectionId);
@@ -62,6 +74,7 @@ const buildReviewAssistantInput = (state, request) => {
   };
 };
 
+/** @param {RepositoryState} state @param {Partial<ReviewAssistantRequest> | null | undefined} request */
 const buildReviewAssistantPrompt = (state, request) => `You are Codex inside Codiff.
 
 A human reviewer wrote a rough inline review note and clicked Ask Codex.
@@ -87,14 +100,24 @@ Repository change digest:
 ${JSON.stringify(buildReviewAssistantInput(state, request), null, 2)}
 `;
 
+/** @param {unknown} value @param {string} [fallback] */
 const cleanReply = (value, fallback = '') =>
   (typeof value === 'string' ? value : fallback).replace(/\n{3,}/g, '\n\n').trim();
 
+/** @param {unknown} input */
 const normalizeReviewAssistantReply = (input) => ({
-  reply: cleanReply(input?.reply, 'Codex could not produce a useful reply.'),
+  reply: cleanReply(
+    input && typeof input === 'object' && 'reply' in input ? input.reply : undefined,
+    'Codex could not produce a useful reply.',
+  ),
   version: 1,
 });
 
+/**
+ * @param {RepositoryState} state
+ * @param {ReviewAssistantRequest} request
+ * @param {CodexOptions} codexOptions
+ */
 const readReviewAssistantReply = async (state, request, codexOptions) => {
   try {
     const response = await runCodex(
@@ -112,7 +135,7 @@ const readReviewAssistantReply = async (state, request, codexOptions) => {
       status: 'ready',
     };
   } catch (error) {
-    if (error && error.code === 'ENOENT') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       return {
         reason:
           'Codex is not installed locally. Install and use Codex, then ask from this comment again.',

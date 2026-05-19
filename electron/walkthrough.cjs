@@ -1,3 +1,5 @@
+// @ts-check
+
 const {
   cleanText,
   normalizeEnum,
@@ -9,6 +11,13 @@ const {
 
 const MAX_TOTAL_PATCH_CHARS = 160_000;
 const MAX_SECTION_PATCH_CHARS = 4_000;
+
+/**
+ * @typedef {import('../src/types.ts').ChangedFile} ChangedFile
+ * @typedef {import('../src/types.ts').DiffSection} DiffSection
+ * @typedef {import('../src/types.ts').RepositoryState} RepositoryState
+ * @typedef {{model?: string; fallbackModel?: string; onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void}} CodexOptions
+ */
 
 const walkthroughSchema = {
   additionalProperties: false,
@@ -55,6 +64,7 @@ const walkthroughSchema = {
   type: 'object',
 };
 
+/** @param {DiffSection} section @param {number} remainingBudget */
 const buildPatchExcerpt = (section, remainingBudget) => {
   const summary = section.summary?.reason ? `Summary: ${section.summary.reason}\n` : '';
   const patch = section.patch || '';
@@ -70,6 +80,7 @@ const buildPatchExcerpt = (section, remainingBudget) => {
   return `${summary}${truncate(patch, maxLength)}`;
 };
 
+/** @param {RepositoryState} state */
 const buildPromptInput = (state) => {
   let remainingPatchBudget = MAX_TOTAL_PATCH_CHARS;
 
@@ -97,6 +108,7 @@ const buildPromptInput = (state) => {
   };
 };
 
+/** @param {RepositoryState} state */
 const buildPrompt = (state) => `You are helping Codiff order a code review.
 
 Return a high-leverage review walkthrough order, not review findings.
@@ -132,6 +144,7 @@ Repository change digest:
 ${JSON.stringify(buildPromptInput(state), null, 2)}
 `;
 
+/** @param {any} input @param {ReadonlyArray<ChangedFile>} files */
 const normalizeWalkthrough = (input, files) => {
   const pathSet = new Set(files.map((file) => file.path));
   const seen = new Set();
@@ -202,6 +215,7 @@ const normalizeWalkthrough = (input, files) => {
   };
 };
 
+/** @param {RepositoryState} state @param {CodexOptions} codexOptions */
 const readWalkthrough = async (state, codexOptions) => {
   if (state.files.length === 0) {
     return {
@@ -233,7 +247,7 @@ const readWalkthrough = async (state, codexOptions) => {
       walkthrough: normalizeWalkthrough(parsed, state.files),
     };
   } catch (error) {
-    if (error && error.code === 'ENOENT') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       return {
         reason:
           'Codex is not installed locally. Install and use Codex, then try Walkthrough again.',

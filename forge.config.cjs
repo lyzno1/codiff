@@ -1,3 +1,5 @@
+// @ts-check
+
 /* eslint-disable @typescript-eslint/no-require-imports, no-undef */
 const { existsSync } = require('node:fs');
 const { join } = require('node:path');
@@ -18,6 +20,28 @@ const osxNotarize =
       }
     : undefined;
 
+/**
+ * @typedef {import('@electron-forge/shared-types').ForgeArch} ForgeArch
+ * @typedef {import('@electron-forge/shared-types').ForgeConfig} ForgeConfig
+ * @typedef {import('@electron-forge/shared-types').ForgePlatform} ForgePlatform
+ * @typedef {Omit<import('@electron-forge/shared-types').ForgePackagerOptions, 'osxNotarize' | 'osxSign'> & {
+ *   osxNotarize?: Record<string, unknown>;
+ *   osxSign?: Record<string, unknown>;
+ * }} CodiffPackagerConfig
+ * @typedef {{
+ *   arch?: Array<ForgeArch>;
+ *   config?: Record<string, unknown>;
+ *   enabled?: boolean;
+ *   name: string;
+ *   platforms?: Array<ForgePlatform> | null;
+ * }} CodiffMakerConfig
+ * @typedef {Omit<ForgeConfig, 'makers' | 'packagerConfig'> & {
+ *   makers: Array<CodiffMakerConfig>;
+ *   packagerConfig: CodiffPackagerConfig;
+ * }} CodiffForgeConfig
+ */
+
+/** @type {CodiffForgeConfig} */
 module.exports = {
   makers: [
     {

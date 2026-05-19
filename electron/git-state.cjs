@@ -1,3 +1,5 @@
+// @ts-check
+
 const { execFile, spawn } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const { createHash } = require('node:crypto');
@@ -6,11 +8,51 @@ const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * @typedef {import('../src/types.ts').ChangedFile} ChangedFile
+ * @typedef {import('../src/types.ts').DiffSection} DiffSection
+ * @typedef {import('../src/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
+ * @typedef {import('../src/types.ts').GitFileStatus} GitFileStatus
+ * @typedef {import('../src/types.ts').PullRequestReviewComment} PullRequestReviewComment
+ * @typedef {import('../src/types.ts').RepositoryState} RepositoryState
+ * @typedef {import('../src/types.ts').ReviewSource} ReviewSource
+ * @typedef {import('../src/types.ts').SubmitPullRequestCommentRequest} SubmitPullRequestCommentRequest
+ * @typedef {import('../src/types.ts').SubmitPullRequestReviewRequest} SubmitPullRequestReviewRequest
+ * @typedef {'staged' | 'unstaged'} WorkingTreeSectionKind
+ * @typedef {{cacheKey: string; contents: string; name: string}} TextFile
+ * @typedef {{reason: string; canLoad?: boolean; fileCount?: number; limit?: number; loadState?: DiffSection['loadState']; size?: number}} DiffSummary
+ * @typedef {{binary: boolean; file?: TextFile; loadState?: DiffSection['loadState']; summary?: DiffSummary}} FileContentResult
+ * @typedef {{
+ *   directory?: boolean;
+ *   oldPath?: string;
+ *   path: string;
+ *   staged: boolean;
+ *   status: GitFileStatus;
+ *   summary?: DiffSummary;
+ *   unstaged: boolean;
+ *   untracked: boolean;
+ * }} StatusItem
+ * @typedef {{force?: boolean}} ReadFileOptions
+ * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
+ * @typedef {{owner: string; repo: string}} GitHubRemote
+ * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
+ * @typedef {{head?: {sha?: string}; title?: string}} GitHubPullRequestMetadata
+ * @typedef {{[key: string]: any}} GitHubReviewComment
+ */
+
+/** @param {string | Buffer} value */
 const getFingerprint = (value) => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
+/** @param {string} email */
 const getGravatarHash = (email) =>
   createHash('md5').update(email.trim().toLowerCase()).digest('hex');
 
+/**
+ * @param {string} repoPath
+ * @param {ReadonlyArray<string>} args
+ * @param {{encoding?: BufferEncoding}} [options]
+ * @returns {Promise<string>}
+ */
 const git = async (repoPath, args, options = {}) => {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
     encoding: options.encoding || 'utf8',
@@ -19,6 +61,7 @@ const git = async (repoPath, args, options = {}) => {
   return stdout;
 };
 
+/** @param {string} repoPath @param {ReadonlyArray<string>} args @returns {Promise<Buffer>} */
 const gitBuffer = async (repoPath, args) => {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
     encoding: 'buffer',
@@ -56,6 +99,7 @@ const generatedDirectoryPathspecs = [...GENERATED_DIRECTORY_NAMES].flatMap((name
   `:(glob)**/${name}/`,
 ]);
 
+/** @param {{path: string}} left @param {{path: string}} right */
 const fileSort = (left, right) => {
   const leftParts = left.path.split('/');
   const rightParts = right.path.split('/');
@@ -80,6 +124,7 @@ const fileSort = (left, right) => {
   return leftParts.length - rightParts.length;
 };
 
+/** @param {string} raw @returns {Array<StatusItem>} */
 const parseStatus = (raw) => {
   const parts = raw.split('\0').filter(Boolean);
   const files = new Map();
@@ -89,6 +134,7 @@ const parseStatus = (raw) => {
     const x = record[0];
     const y = record[1];
     let path = record.slice(3);
+    /** @type {string | undefined} */
     let oldPath;
 
     if (x === 'R' || x === 'C' || y === 'R' || y === 'C') {
@@ -129,8 +175,10 @@ const parseStatus = (raw) => {
   return [...files.values()].sort(fileSort);
 };
 
+/** @param {Buffer} buffer */
 const isBinaryBuffer = (buffer) => buffer.includes(0);
 
+/** @param {number} size */
 const formatBytes = (size) => {
   if (size < 1024) {
     return `${size} B`;
@@ -148,11 +196,13 @@ const formatBytes = (size) => {
   return `${size} B`;
 };
 
+/** @param {string} reason @param {Partial<DiffSummary>} [details] @returns {DiffSummary} */
 const createSummary = (reason, details = {}) => ({
   reason,
   ...details,
 });
 
+/** @param {unknown} path */
 const validateRepositoryPath = (path) => {
   if (typeof path !== 'string' || path.length === 0 || path.includes('\0') || isAbsolute(path)) {
     throw new Error('Invalid repository path.');
@@ -166,6 +216,7 @@ const validateRepositoryPath = (path) => {
   return path;
 };
 
+/** @param {string} repoRoot @param {string} path */
 const readFileStat = async (repoRoot, path) => {
   try {
     return await fs.lstat(join(repoRoot, path));
@@ -174,6 +225,7 @@ const readFileStat = async (repoRoot, path) => {
   }
 };
 
+/** @param {string} repoRoot @param {string} spec */
 const getBlobSize = async (repoRoot, spec) => {
   try {
     return Number((await git(repoRoot, ['cat-file', '-s', spec])).trim());
@@ -182,6 +234,7 @@ const getBlobSize = async (repoRoot, spec) => {
   }
 };
 
+/** @param {string} name @param {Buffer} buffer @param {string} cacheKey @returns {FileContentResult} */
 const bufferToTextFile = (name, buffer, cacheKey) => {
   if (isBinaryBuffer(buffer)) {
     return {
@@ -200,6 +253,13 @@ const bufferToTextFile = (name, buffer, cacheKey) => {
   };
 };
 
+/**
+ * @param {string} repoRoot
+ * @param {string} ref
+ * @param {string} path
+ * @param {ReadFileOptions} [options]
+ * @returns {Promise<FileContentResult>}
+ */
 const readGitFile = async (repoRoot, ref, path, options = {}) => {
   const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
   const spec = `${ref}:${path}`;
@@ -237,6 +297,12 @@ const readGitFile = async (repoRoot, ref, path, options = {}) => {
   }
 };
 
+/**
+ * @param {string} repoRoot
+ * @param {string} path
+ * @param {ReadFileOptions} [options]
+ * @returns {Promise<FileContentResult>}
+ */
 const readIndexFile = async (repoRoot, path, options = {}) => {
   const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
   const spec = `:${path}`;
@@ -274,6 +340,12 @@ const readIndexFile = async (repoRoot, path, options = {}) => {
   }
 };
 
+/**
+ * @param {string} repoRoot
+ * @param {string} path
+ * @param {ReadFileOptions} [options]
+ * @returns {Promise<FileContentResult>}
+ */
 const readWorkingTreeFile = async (repoRoot, path, options = {}) => {
   const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
 
@@ -366,6 +438,7 @@ const readWorkingTreeFile = async (repoRoot, path, options = {}) => {
   }
 };
 
+/** @param {string} path @param {string} contents */
 const createPatchForNewFile = (path, contents) => {
   const trimmed = contents.endsWith('\n') ? contents.slice(0, -1) : contents;
   const lines = trimmed.length > 0 ? trimmed.split('\n') : [];
@@ -386,6 +459,7 @@ const createPatchForNewFile = (path, contents) => {
     .concat(noNewline, '\n');
 };
 
+/** @param {string} repoRoot @param {string} path @param {WorkingTreeSectionKind} kind */
 const getPatch = async (repoRoot, path, kind) => {
   const args =
     kind === 'staged'
@@ -399,6 +473,7 @@ const getPatch = async (repoRoot, path, kind) => {
   };
 };
 
+/** @param {...FileContentResult} results @returns {{binary: boolean; loadState: DiffSection['loadState']; summary?: DiffSummary}} */
 const summarizeContent = (...results) => {
   const binary = results.some((result) => result.binary);
   if (binary) {
@@ -426,6 +501,12 @@ const summarizeContent = (...results) => {
   };
 };
 
+/**
+ * @param {string} repoRoot
+ * @param {StatusItem} item
+ * @param {WorkingTreeSectionKind} kind
+ * @param {ReadFileOptions} [options]
+ */
 const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
   if (kind === 'staged') {
     const oldFile = await readGitFile(repoRoot, 'HEAD', item.oldPath || item.path, options);
@@ -440,6 +521,7 @@ const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
   }
 
   if (item.untracked) {
+    /** @type {FileContentResult} */
     const newFile = item.summary
       ? {
           binary: false,
@@ -479,6 +561,13 @@ const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
   };
 };
 
+/**
+ * @param {string} repoRoot
+ * @param {StatusItem} item
+ * @param {WorkingTreeSectionKind} kind
+ * @param {ReadFileOptions} [options]
+ * @returns {Promise<DiffSection>}
+ */
 const createSection = async (repoRoot, item, kind, options = {}) => {
   const contents = await getWorkingTreeContents(repoRoot, item, kind, options);
   const id = `${item.path}:${kind}`;
@@ -519,6 +608,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
   };
 };
 
+/** @param {string} statusCode @returns {GitFileStatus} */
 const normalizeStatus = (statusCode) =>
   statusCode === 'A'
     ? 'added'
@@ -528,6 +618,7 @@ const normalizeStatus = (statusCode) =>
         ? 'renamed'
         : 'modified';
 
+/** @param {string} value @returns {PullRequestReference} */
 const parseGitHubPullRequestUrl = (value) => {
   let url;
   try {
@@ -554,6 +645,7 @@ const parseGitHubPullRequestUrl = (value) => {
   };
 };
 
+/** @param {string} value @returns {GitHubRemote | null} */
 const parseGitHubRemoteUrl = (value) => {
   const trimmed = value.trim();
   const sshMatch = trimmed.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
@@ -582,6 +674,7 @@ const parseGitHubRemoteUrl = (value) => {
   }
 };
 
+/** @param {string} repoRoot @returns {Promise<Array<GitHubRemote>>} */
 const readLocalGitHubRemotes = async (repoRoot) => {
   const raw = await gitOrEmpty(repoRoot, ['remote', '-v']);
   const remotes = [];
@@ -595,6 +688,7 @@ const readLocalGitHubRemotes = async (repoRoot) => {
   return remotes;
 };
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
 const assertPullRequestMatchesRepository = async (repoRoot, pullRequest) => {
   const remotes = await readLocalGitHubRemotes(repoRoot);
   const matches = remotes.some(
@@ -610,13 +704,21 @@ const assertPullRequestMatchesRepository = async (repoRoot, pullRequest) => {
   }
 };
 
+/**
+ * @param {string} repoRoot
+ * @param {ReadonlyArray<string>} args
+ * @param {unknown} [input]
+ * @returns {Promise<string>}
+ */
 const ghApi = (repoRoot, args, input) =>
   new Promise((resolve, reject) => {
     const child = spawn('gh', ['api', ...args], {
       cwd: repoRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    /** @type {Array<Buffer>} */
     const stdout = [];
+    /** @type {Array<Buffer>} */
     const stderr = [];
 
     child.stdout.on('data', (chunk) => stdout.push(chunk));
@@ -640,6 +742,7 @@ const ghApi = (repoRoot, args, input) =>
     }
   });
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<GitHubPullRequestMetadata>} */
 const readPullRequestMetadata = async (repoRoot, pullRequest) =>
   JSON.parse(
     await ghApi(repoRoot, [
@@ -647,6 +750,7 @@ const readPullRequestMetadata = async (repoRoot, pullRequest) =>
     ]),
   );
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<Array<GitHubPullRequestFile>>} */
 const readPullRequestFiles = async (repoRoot, pullRequest) => {
   const pages = JSON.parse(
     await ghApi(repoRoot, [
@@ -658,6 +762,7 @@ const readPullRequestFiles = async (repoRoot, pullRequest) => {
   return pages.flat();
 };
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
 const readPullRequestDiff = async (repoRoot, pullRequest) =>
   ghApi(repoRoot, [
     '-H',
@@ -665,11 +770,15 @@ const readPullRequestDiff = async (repoRoot, pullRequest) =>
     `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
   ]);
 
+/** @param {unknown} side */
 const fromGitHubReviewSide = (side) => (side === 'LEFT' ? 'deletions' : 'additions');
+/** @param {unknown} side */
 const isGitHubReviewSide = (side) => side === 'LEFT' || side === 'RIGHT';
 
+/** @param {...unknown} values */
 const firstNumber = (...values) => values.find((value) => typeof value === 'number');
 
+/** @param {GitHubReviewComment} comment */
 const normalizeGitHubReviewComment = (comment) => {
   const lineNumber = firstNumber(comment.line, comment.original_line);
   if (lineNumber == null || !comment.path || !comment.body) {
@@ -702,6 +811,7 @@ const normalizeGitHubReviewComment = (comment) => {
   };
 };
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
 const readPullRequestComments = async (repoRoot, pullRequest) => {
   const pages = JSON.parse(
     await ghApi(repoRoot, [
@@ -713,6 +823,7 @@ const readPullRequestComments = async (repoRoot, pullRequest) => {
   return pages.flat().map(normalizeGitHubReviewComment).filter(Boolean);
 };
 
+/** @param {string} diff @returns {Map<string, string>} */
 const splitPullRequestDiff = (diff) => {
   const chunks = diff
     .split(/(?=^diff --git )/m)
@@ -733,8 +844,10 @@ const splitPullRequestDiff = (diff) => {
   return map;
 };
 
+/** @param {string} path */
 const quotePatchPath = (path) => path.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
 
+/** @param {GitHubPullRequestFile} file */
 const createPatchFromPullRequestFile = (file) => {
   if (!file.patch) {
     return '';
@@ -750,6 +863,7 @@ const createPatchFromPullRequestFile = (file) => {
   return `${header.join('\n')}\n${file.patch}\n`;
 };
 
+/** @param {string} status @returns {GitFileStatus} */
 const normalizePullRequestFileStatus = (status) =>
   status === 'added'
     ? 'added'
@@ -759,6 +873,7 @@ const normalizePullRequestFileStatus = (status) =>
         ? 'renamed'
         : 'modified';
 
+/** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
 const createPullRequestSource = (pullRequest, metadata) => ({
   headSha: metadata.head?.sha,
   number: pullRequest.number,
@@ -769,6 +884,7 @@ const createPullRequestSource = (pullRequest, metadata) => ({
   url: pullRequest.url,
 });
 
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @returns {Promise<RepositoryState>} */
 const readPullRequestState = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(source.url);
@@ -782,6 +898,7 @@ const readPullRequestState = async (launchPath, source) => {
   ]);
   const diffByPath = splitPullRequestDiff(diff);
 
+  /** @type {Array<ChangedFile>} */
   const files = [...apiFiles]
     .sort((left, right) => left.filename.localeCompare(right.filename))
     .map((file) => {
@@ -824,9 +941,12 @@ const readPullRequestState = async (launchPath, source) => {
   };
 };
 
+/** @param {PullRequestReviewComment['side']} side */
 const toGitHubReviewSide = (side) => (side === 'deletions' ? 'LEFT' : 'RIGHT');
 
+/** @param {PullRequestReviewComment} comment */
 const normalizePullRequestComment = (comment) => {
+  /** @type {{body: string; line: number; path: string; side: string; start_line?: number; start_side?: string}} */
   const payload = {
     body: comment.body,
     line: comment.lineNumber,
@@ -844,6 +964,7 @@ const normalizePullRequestComment = (comment) => {
   return payload;
 };
 
+/** @param {string} launchPath @param {SubmitPullRequestCommentRequest} request */
 const submitPullRequestComment = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(request.source.url);
@@ -873,6 +994,7 @@ const submitPullRequestComment = async (launchPath, request) => {
   return comment;
 };
 
+/** @param {string} launchPath @param {SubmitPullRequestReviewRequest} request */
 const submitPullRequestReview = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(request.source.url);
@@ -899,8 +1021,10 @@ const submitPullRequestReview = async (launchPath, request) => {
   );
 };
 
+/** @param {string} raw @returns {Array<Pick<StatusItem, 'oldPath' | 'path' | 'status'>>} */
 const parseCommitNameStatus = (raw) => {
   const parts = raw.split('\0').filter(Boolean);
+  /** @type {Array<Pick<StatusItem, 'oldPath' | 'path' | 'status'>>} */
   const files = [];
 
   for (let index = 0; index < parts.length; ) {
@@ -927,6 +1051,7 @@ const parseCommitNameStatus = (raw) => {
   return files.sort(fileSort);
 };
 
+/** @param {string} repoRoot @returns {Promise<Array<StatusItem>>} */
 const listUntrackedItems = async (repoRoot) => {
   const rawFiles = await git(repoRoot, [
     'ls-files',
@@ -938,6 +1063,7 @@ const listUntrackedItems = async (repoRoot) => {
     ...generatedDirectoryPathspecExcludes,
   ]);
   const paths = rawFiles.split('\0').filter(Boolean).sort();
+  /** @type {Array<StatusItem>} */
   const items = paths.slice(0, MAX_UNTRACKED_INITIAL_ITEMS).map((path) => ({
     path,
     staged: false,
@@ -992,6 +1118,7 @@ const listUntrackedItems = async (repoRoot) => {
   return [...unique.values()].sort(fileSort);
 };
 
+/** @param {string} launchPath @returns {Promise<RepositoryState>} */
 const readWorkingTreeState = async (launchPath) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const [trackedStatus, untrackedItems] = await Promise.all([
@@ -999,9 +1126,11 @@ const readWorkingTreeState = async (launchPath) => {
     listUntrackedItems(repoRoot),
   ]);
   const status = [...parseStatus(trackedStatus), ...untrackedItems].sort(fileSort);
+  /** @type {Array<ChangedFile>} */
   const files = [];
 
   for (const item of status) {
+    /** @type {Array<DiffSection>} */
     const sections = [];
 
     if (item.staged) {
@@ -1045,6 +1174,7 @@ const readWorkingTreeState = async (launchPath) => {
   };
 };
 
+/** @param {string} repoRoot @param {string} path @returns {Promise<StatusItem>} */
 const getStatusItemForPath = async (repoRoot, path) => {
   const trackedStatus = parseStatus(
     await git(repoRoot, ['status', '--porcelain=v1', '-z', '-uno']),
@@ -1065,6 +1195,7 @@ const getStatusItemForPath = async (repoRoot, path) => {
   };
 };
 
+/** @param {string} launchPath @param {DiffSectionContentRequest} request */
 const readDiffSectionContent = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const path = validateRepositoryPath(request.path);
@@ -1073,11 +1204,12 @@ const readDiffSectionContent = async (launchPath, request) => {
   }
 
   const item = await getStatusItemForPath(repoRoot, path);
-  return createSection(repoRoot, item, request.kind, {
+  return createSection(repoRoot, item, /** @type {WorkingTreeSectionKind} */ (request.kind), {
     force: request.force,
   });
 };
 
+/** @param {string} repoRoot */
 const readUntrackedFileSignatures = async (repoRoot) => {
   const raw = await git(repoRoot, [
     'ls-files',
@@ -1103,6 +1235,7 @@ const readUntrackedFileSignatures = async (repoRoot) => {
   return signatures.join('\0');
 };
 
+/** @param {string} repoRoot @param {ReadonlyArray<string>} args */
 const gitOrEmpty = async (repoRoot, args) => {
   try {
     return await git(repoRoot, args);
@@ -1111,6 +1244,7 @@ const gitOrEmpty = async (repoRoot, args) => {
   }
 };
 
+/** @param {string} launchPath */
 const readGitIdentity = async (launchPath) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const [name, email] = await Promise.all([
@@ -1128,6 +1262,7 @@ const readGitIdentity = async (launchPath) => {
   };
 };
 
+/** @param {string} launchPath */
 const readRepositoryChangeSignature = async (launchPath) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const [head, status, stagedDiff, unstagedDiff, untracked] = await Promise.all([
@@ -1144,6 +1279,7 @@ const readRepositoryChangeSignature = async (launchPath) => {
   };
 };
 
+/** @param {string} launchPath @param {string} ref @returns {Promise<RepositoryState>} */
 const readCommitState = async (launchPath, ref) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const commit = (await git(repoRoot, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
@@ -1159,6 +1295,7 @@ const readCommitState = async (launchPath, ref) => {
       commit,
     ]),
   );
+  /** @type {Array<ChangedFile>} */
   const files = [];
 
   for (const item of status) {
@@ -1209,6 +1346,7 @@ const readCommitState = async (launchPath, ref) => {
   };
 };
 
+/** @param {string} launchPath @param {ReviewSource} [source] @returns {Promise<RepositoryState>} */
 const readRepositoryState = async (launchPath, source = { type: 'working-tree' }) =>
   source.type === 'pull-request'
     ? readPullRequestState(launchPath, source)
@@ -1216,6 +1354,7 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
       ? readCommitState(launchPath, source.ref)
       : readWorkingTreeState(launchPath);
 
+/** @param {string} launchPath @param {number} [limit] */
 const listRepositoryHistory = async (launchPath, limit = 200) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const raw = await git(repoRoot, [

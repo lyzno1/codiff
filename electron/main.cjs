@@ -1,3 +1,5 @@
+// @ts-check
+
 const { execFile, execFileSync } = require('node:child_process');
 const {
   accessSync,
@@ -51,12 +53,30 @@ const {
 const { createPendingCommentsClipboardController } = require('./pending-comments.cjs');
 const { readWalkthrough } = require('./walkthrough.cjs');
 
+/**
+ * @typedef {import('../src/types.ts').CodiffLaunchOptions} CodiffLaunchOptions
+ * @typedef {import('../src/types.ts').CodiffPreferences} CodiffPreferences
+ * @typedef {import('../src/types.ts').CodiffTheme} CodiffTheme
+ * @typedef {import('../src/types.ts').ReviewSource} ReviewSource
+ * @typedef {{key: string; repositoryRoot: string; sourceKey: string}} WindowIdentity
+ * @typedef {{direction: string; name: string; owner: string; repo: string}} GitHubRemote
+ * @typedef {{repositoryPath?: string; launchOptions?: CodiffLaunchOptions}} SingleInstanceAdditionalData
+ * @typedef {{changed: boolean; checking: boolean; interval?: ReturnType<typeof setInterval>; signature?: string}} RepositoryWatcher
+ * @typedef {{args: Array<string>; command: string}} EditorCommand
+ * @typedef {{launchOptions: CodiffLaunchOptions; pullRequestNumber: number | null; repositoryPath: string | null}} ParsedCommandLineArguments
+ */
+
 const root = dirname(__dirname);
+/** @type {Map<number, RepositoryWatcher>} */
 const repositoryWatchers = new Map();
+/** @type {Map<number, WindowIdentity | null>} */
 const windowIdentities = new Map();
+/** @type {Map<number, string>} */
 const windowRepositories = new Map();
+/** @type {Map<number, CodiffLaunchOptions>} */
 const windowLaunchOptions = new Map();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
+/** @type {CodiffPreferences} */
 let preferences = {
   copyCommentsOnClose: false,
   openAIModel: DEFAULT_OPENAI_MODEL,
@@ -67,20 +87,25 @@ let preferences = {
 const commitHashPattern = /^[0-9a-f]{4,64}$/i;
 const pullRequestNumberPattern = /^#([1-9]\d*)$/;
 
+/** @param {string} arg */
 const isCommitHashArgument = (arg) => commitHashPattern.test(arg) && !existsSync(resolve(arg));
 
+/** @param {string} arg */
 const parsePullRequestNumberArgument = (arg) => {
   const match = arg.match(pullRequestNumberPattern);
   return match ? Number(match[1]) : null;
 };
 
+/** @param {string} value */
 const parsePullRequestNumberValue = (value) => {
   const normalized = value.startsWith('#') ? value : `#${value}`;
   return parsePullRequestNumberArgument(normalized);
 };
 
+/** @param {string} arg */
 const isPullRequestMarkerArgument = (arg) => /^(?:pr|pull-request)$/i.test(arg);
 
+/** @param {string} arg */
 const isPullRequestUrlArgument = (arg) => {
   try {
     const url = new URL(arg);
@@ -93,6 +118,7 @@ const isPullRequestUrlArgument = (arg) => {
   }
 };
 
+/** @param {string} value @returns {{owner: string; repo: string} | null} */
 const parseGitHubRemoteUrl = (value) => {
   const trimmed = value.trim();
   const sshMatch = trimmed.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
@@ -121,17 +147,19 @@ const parseGitHubRemoteUrl = (value) => {
   }
 };
 
+/** @param {string} repositoryPath @returns {Array<GitHubRemote>} */
 const readGitHubRemotes = (repositoryPath) => {
   const repoRoot = execFileSync('git', ['-C', repositoryPath, 'rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
   }).trim();
   const raw = execFileSync('git', ['-C', repoRoot, 'remote', '-v'], { encoding: 'utf8' });
+  /** @type {Array<GitHubRemote>} */
   const remotes = [];
 
   for (const line of raw.split('\n')) {
     const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
     const remote = match ? parseGitHubRemoteUrl(match[2]) : null;
-    if (remote) {
+    if (remote && match) {
       remotes.push({
         direction: match[3],
         name: match[1],
@@ -143,8 +171,10 @@ const readGitHubRemotes = (repositoryPath) => {
   return remotes;
 };
 
+/** @param {ReadonlyArray<GitHubRemote>} remotes */
 const selectGitHubRemote = (remotes) =>
   [...remotes].sort((left, right) => {
+    /** @param {GitHubRemote} remote */
     const getPriority = (remote) =>
       remote.name === 'origin'
         ? remote.direction === 'fetch'
@@ -156,6 +186,7 @@ const selectGitHubRemote = (remotes) =>
     return getPriority(left) - getPriority(right);
   })[0] ?? null;
 
+/** @param {string} repositoryPath @param {number} number */
 const resolvePullRequestUrl = (repositoryPath, number) => {
   let remotes;
   try {
@@ -176,6 +207,7 @@ const resolvePullRequestUrl = (repositoryPath, number) => {
   return `https://github.com/${remote.owner}/${remote.repo}/pull/${number}`;
 };
 
+/** @param {ReadonlyArray<string>} [commandLine] @returns {ParsedCommandLineArguments} */
 const parseCommandLineArguments = (commandLine = process.argv) => {
   const args = commandLine.slice(process.defaultApp ? 2 : 1);
   const useEnvironment = commandLine === process.argv;
@@ -263,9 +295,11 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   };
 };
 
+/** @param {ReadonlyArray<string>} [commandLine] */
 const getCommandLineRepositoryPath = (commandLine = process.argv) =>
   parseCommandLineArguments(commandLine).repositoryPath;
 
+/** @param {ReadonlyArray<string>} [commandLine] @param {string} [fallbackPath] @returns {CodiffLaunchOptions} */
 const getCommandLineLaunchOptions = (commandLine = process.argv, fallbackPath = process.cwd()) => {
   const { launchOptions, pullRequestNumber, repositoryPath } =
     parseCommandLineArguments(commandLine);
@@ -296,9 +330,11 @@ const getLaunchOptions = () => getCommandLineLaunchOptions();
 
 const getPreferencesPath = () => join(app.getPath('userData'), 'preferences.json');
 
+/** @param {unknown} theme @returns {CodiffTheme} */
 const normalizeTheme = (theme) =>
   theme === 'system' || theme === 'light' || theme === 'dark' ? theme : 'system';
 
+/** @returns {CodiffPreferences} */
 const readPreferences = () => {
   try {
     const storedPreferences = JSON.parse(readFileSync(getPreferencesPath(), 'utf8'));
@@ -325,6 +361,7 @@ const sendPreferencesChanged = () => {
   }
 };
 
+/** @param {Partial<CodiffPreferences>} nextPreferences */
 const updatePreferences = (nextPreferences) => {
   preferences = {
     ...preferences,
@@ -338,6 +375,7 @@ const updatePreferences = (nextPreferences) => {
   Menu.setApplicationMenu(buildApplicationMenu());
 };
 
+/** @param {string} model */
 const selectOpenAIModel = (model) => {
   const openAIModel = normalizeOpenAIModel(model);
   if (preferences.openAIModel === openAIModel) {
@@ -350,15 +388,18 @@ const selectOpenAIModel = (model) => {
 const getCodexOptions = () => ({
   fallbackModel: FALLBACK_OPENAI_MODEL,
   model: preferences.openAIModel,
+  /** @param {string} fallbackModel */
   onModelFallback: async (fallbackModel) => {
     updatePreferences({ openAIModel: fallbackModel });
   },
 });
 
+/** @param {CodiffTheme} theme */
 const updateTheme = (theme) => {
   updatePreferences({ theme });
 };
 
+/** @param {string} repositoryPath */
 const readRepositoryWatcherSnapshot = async (repositoryPath) => {
   try {
     return await readRepositoryChangeSignature(repositoryPath);
@@ -370,6 +411,7 @@ const readRepositoryWatcherSnapshot = async (repositoryPath) => {
   }
 };
 
+/** @param {number} webContentsId @param {string} repositoryPath */
 const resetRepositoryWatcher = async (webContentsId, repositoryPath) => {
   const watcher = repositoryWatchers.get(webContentsId);
   if (!watcher) {
@@ -381,8 +423,10 @@ const resetRepositoryWatcher = async (webContentsId, repositoryPath) => {
   watcher.signature = snapshot.signature;
 };
 
+/** @param {import('electron').BrowserWindow} browserWindow @param {string} repositoryPath */
 const startRepositoryWatcher = (browserWindow, repositoryPath) => {
   const webContentsId = browserWindow.webContents.id;
+  /** @type {RepositoryWatcher} */
   const watcher = {
     changed: false,
     checking: false,
@@ -420,10 +464,14 @@ const startRepositoryWatcher = (browserWindow, repositoryPath) => {
   watcher.interval = setInterval(() => void checkForChanges(), 2500);
 };
 
+/** @param {import('electron').BaseWindow | undefined} browserWindow */
 const openRepositoryFolder = async (browserWindow) => {
-  const result = await dialog.showOpenDialog(browserWindow ?? undefined, {
-    properties: ['openDirectory'],
-  });
+  const options = {
+    properties: /** @type {Array<'openDirectory'>} */ (['openDirectory']),
+  };
+  const result = browserWindow
+    ? await dialog.showOpenDialog(browserWindow, options)
+    : await dialog.showOpenDialog(options);
 
   if (!result.canceled && result.filePaths[0]) {
     focusOrCreateWindow(result.filePaths[0], { repositoryPathProvided: true, walkthrough: false });
@@ -454,6 +502,7 @@ const getPreferredTerminalHelperTargetPath = () => {
   return join(app.getPath('home'), '.local/bin/codiff');
 };
 
+/** @param {string} targetPath */
 const isInstalledTerminalHelper = (targetPath) => {
   try {
     if (!existsSync(targetPath)) {
@@ -500,6 +549,7 @@ const getWritableHelperDirectory = () => {
   return localBin;
 };
 
+/** @param {import('electron').BaseWindow | undefined | null} browserWindow */
 const installTerminalHelper = async (browserWindow) => {
   try {
     const sourcePath = getTerminalHelperSourcePath();
@@ -521,32 +571,48 @@ const installTerminalHelper = async (browserWindow) => {
 
     symlinkSync(sourcePath, targetPath);
 
-    await dialog.showMessageBox(browserWindow ?? undefined, {
+    /** @type {import('electron').MessageBoxOptions} */
+    const successMessage = {
       buttons: ['OK'],
       message: `Installed codiff at ${targetPath}.`,
       type: 'info',
-    });
+    };
+    if (browserWindow) {
+      await dialog.showMessageBox(browserWindow, successMessage);
+    } else {
+      await dialog.showMessageBox(successMessage);
+    }
     return true;
   } catch (error) {
-    await dialog.showMessageBox(browserWindow ?? undefined, {
+    /** @type {import('electron').MessageBoxOptions} */
+    const errorMessage = {
       buttons: ['OK'],
       detail: error instanceof Error ? error.message : String(error),
       message: 'Could not install the terminal helper.',
       type: 'error',
-    });
+    };
+    if (browserWindow) {
+      await dialog.showMessageBox(browserWindow, errorMessage);
+    } else {
+      await dialog.showMessageBox(errorMessage);
+    }
     return false;
   }
 };
 
+/** @param {string} command */
 const parseEditorCommand = (command) =>
   command.match(/"[^"]+"|'[^']+'|\S+/g)?.map((part) => part.replace(/^['"]|['"]$/g, '')) ?? [];
 
+/** @param {string} command @param {ReadonlyArray<string>} args */
 const runEditorCommand = (command, args) =>
   new Promise((resolveCommand) => {
     execFile(command, args, { windowsHide: true }, (error) => resolveCommand(!error));
   });
 
+/** @param {string} absolutePath @returns {Array<EditorCommand>} */
 const getEditorCommands = (absolutePath) => {
+  /** @type {Array<EditorCommand>} */
   const commands = [];
   const customEditor = process.env.CODIFF_EDITOR;
   if (customEditor) {
@@ -583,6 +649,7 @@ const getEditorCommands = (absolutePath) => {
   return commands;
 };
 
+/** @param {string} absolutePath */
 const openFileInEditor = async (absolutePath) => {
   for (const { args, command } of getEditorCommands(absolutePath)) {
     if (await runEditorCommand(command, args)) {
@@ -593,6 +660,7 @@ const openFileInEditor = async (absolutePath) => {
   await shell.openPath(absolutePath);
 };
 
+/** @returns {Array<import('electron').MenuItemConstructorOptions>} */
 const buildOpenAIModelSubmenu = () =>
   OPENAI_MODELS.map((model) => ({
     checked: preferences.openAIModel === model.id,
@@ -601,130 +669,142 @@ const buildOpenAIModelSubmenu = () =>
     type: 'radio',
   }));
 
+/** @returns {import('electron').Menu} */
 const buildApplicationMenu = () =>
-  Menu.buildFromTemplate([
-    ...(process.platform === 'darwin'
-      ? [
+  Menu.buildFromTemplate(
+    /** @type {Array<import('electron').MenuItemConstructorOptions>} */ ([
+      ...(process.platform === 'darwin'
+        ? [
+            {
+              label: 'Codiff',
+              submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                {
+                  label: 'OpenAI Model',
+                  submenu: buildOpenAIModelSubmenu(),
+                },
+                { type: 'separator' },
+                {
+                  click:
+                    /** @type {NonNullable<import('electron').MenuItemConstructorOptions['click']>} */ (
+                      (_menuItem, browserWindow) => installTerminalHelper(browserWindow)
+                    ),
+                  label: 'Install Terminal Helper',
+                },
+                { type: 'separator' },
+                { role: 'quit' },
+              ],
+            },
+          ]
+        : []),
+      {
+        label: 'File',
+        submenu: [
+          ...(process.platform === 'darwin'
+            ? []
+            : [
+                {
+                  label: 'OpenAI Model',
+                  submenu: buildOpenAIModelSubmenu(),
+                },
+                { type: 'separator' },
+              ]),
           {
-            label: 'Codiff',
+            accelerator: 'CommandOrControl+O',
+            click: (_menuItem, browserWindow) => openRepositoryFolder(browserWindow),
+            label: 'Open Folder...',
+          },
+          { type: 'separator' },
+          process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
+        ],
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'pasteAndMatchStyle' },
+          { role: 'delete' },
+          { role: 'selectAll' },
+          { type: 'separator' },
+          {
+            accelerator: 'CommandOrControl+F',
+            click: (_menuItem, browserWindow) => {
+              if (browserWindow instanceof BrowserWindow) {
+                browserWindow.webContents.send('codiff:findInDiffs');
+              }
+            },
+            label: 'Find in Diffs',
+          },
+        ],
+      },
+      {
+        label: 'View',
+        submenu: [
+          {
+            checked: preferences.showWhitespace,
+            click: (menuItem) => {
+              updatePreferences({
+                showWhitespace: menuItem.checked,
+              });
+            },
+            label: 'Show Whitespace',
+            type: 'checkbox',
+          },
+          {
+            checked: preferences.copyCommentsOnClose,
+            click: (menuItem) => {
+              updatePreferences({
+                copyCommentsOnClose: menuItem.checked,
+              });
+            },
+            label: 'Copy Comments on Close',
+            type: 'checkbox',
+          },
+          {
+            label: 'Theme',
             submenu: [
-              { role: 'about' },
-              { type: 'separator' },
               {
-                label: 'OpenAI Model',
-                submenu: buildOpenAIModelSubmenu(),
+                checked: preferences.theme === 'system',
+                click: () => updateTheme('system'),
+                label: 'Match System',
+                type: 'radio',
               },
-              { type: 'separator' },
               {
-                click: (_menuItem, browserWindow) => installTerminalHelper(browserWindow),
-                label: 'Install Terminal Helper',
+                checked: preferences.theme === 'light',
+                click: () => updateTheme('light'),
+                label: 'Light',
+                type: 'radio',
               },
-              { type: 'separator' },
-              { role: 'quit' },
+              {
+                checked: preferences.theme === 'dark',
+                click: () => updateTheme('dark'),
+                label: 'Dark',
+                type: 'radio',
+              },
             ],
           },
-        ]
-      : []),
-    {
-      label: 'File',
-      submenu: [
-        ...(process.platform === 'darwin'
-          ? []
-          : [
-              {
-                label: 'OpenAI Model',
-                submenu: buildOpenAIModelSubmenu(),
-              },
-              { type: 'separator' },
-            ]),
-        {
-          accelerator: 'CommandOrControl+O',
-          click: (_menuItem, browserWindow) => openRepositoryFolder(browserWindow),
-          label: 'Open Folder...',
-        },
-        { type: 'separator' },
-        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
-      ],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'pasteAndMatchStyle' },
-        { role: 'delete' },
-        { role: 'selectAll' },
-        { type: 'separator' },
-        {
-          accelerator: 'CommandOrControl+F',
-          click: (_menuItem, browserWindow) => {
-            browserWindow?.webContents.send('codiff:findInDiffs');
-          },
-          label: 'Find in Diffs',
-        },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        {
-          checked: preferences.showWhitespace,
-          click: (menuItem) => {
-            updatePreferences({
-              showWhitespace: menuItem.checked,
-            });
-          },
-          label: 'Show Whitespace',
-          type: 'checkbox',
-        },
-        {
-          checked: preferences.copyCommentsOnClose,
-          click: (menuItem) => {
-            updatePreferences({
-              copyCommentsOnClose: menuItem.checked,
-            });
-          },
-          label: 'Copy Comments on Close',
-          type: 'checkbox',
-        },
-        {
-          label: 'Theme',
-          submenu: [
-            {
-              checked: preferences.theme === 'system',
-              click: () => updateTheme('system'),
-              label: 'Match System',
-              type: 'radio',
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+          { role: 'reload' },
+          {
+            accelerator: 'CommandOrControl+Alt+J',
+            click: (_menuItem, browserWindow) => {
+              if (browserWindow instanceof BrowserWindow) {
+                browserWindow.webContents.toggleDevTools();
+              }
             },
-            {
-              checked: preferences.theme === 'light',
-              click: () => updateTheme('light'),
-              label: 'Light',
-              type: 'radio',
-            },
-            {
-              checked: preferences.theme === 'dark',
-              click: () => updateTheme('dark'),
-              label: 'Dark',
-              type: 'radio',
-            },
-          ],
-        },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-        { role: 'reload' },
-        {
-          accelerator: 'CommandOrControl+Alt+J',
-          click: (_menuItem, browserWindow) => browserWindow?.webContents.toggleDevTools(),
-          label: 'Toggle Developer Tools',
-        },
-      ],
-    },
-  ]);
+            label: 'Toggle Developer Tools',
+          },
+        ],
+      },
+    ]),
+  );
 
 let copyingPendingCommentsBeforeQuit = false;
 let quitting = false;
@@ -735,6 +815,11 @@ ipcMain.on(
   pendingCommentsClipboardController.handleCopyPendingCommentsResult,
 );
 
+/**
+ * @param {string} repositoryPath
+ * @param {CodiffLaunchOptions} [launchOptions]
+ * @param {WindowIdentity | null} [identity]
+ */
 const createWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
@@ -810,6 +895,7 @@ const createWindow = (
   }
 };
 
+/** @param {import('electron').BrowserWindow} window */
 const focusWindow = (window) => {
   if (window.isMinimized()) {
     window.restore();
@@ -825,6 +911,10 @@ const focusWindow = (window) => {
   window.focus();
 };
 
+/**
+ * @param {string} repositoryPath
+ * @param {CodiffLaunchOptions} [launchOptions]
+ */
 const focusOrCreateWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
@@ -859,13 +949,10 @@ if (squirrelStartup || !lock) {
   app.setName('Codiff');
 
   app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
+    const data = /** @type {SingleInstanceAdditionalData} */ (additionalData || {});
     focusOrCreateWindow(
-      resolve(
-        additionalData?.repositoryPath ||
-          getCommandLineRepositoryPath(commandLine) ||
-          workingDirectory,
-      ),
-      additionalData?.launchOptions || getCommandLineLaunchOptions(commandLine, workingDirectory),
+      resolve(data.repositoryPath || getCommandLineRepositoryPath(commandLine) || workingDirectory),
+      data.launchOptions || getCommandLineLaunchOptions(commandLine, workingDirectory),
     );
   });
 
