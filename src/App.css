@@ -181,10 +181,10 @@
   display: inline-flex;
   font-size: 13px;
   font-weight: 600;
-  gap: 5px;
+  gap: 8px;
   left: 50%;
   line-height: 1.25;
-  padding: 8px 13px;
+  padding: 8px 8px 8px 13px;
   pointer-events: none;
   position: fixed;
   top: 18px;
@@ -205,6 +205,12 @@
   opacity: 0;
 }
 
+.repository-change-banner-content {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
 .repository-change-banner button {
   background: transparent;
   border: 0;
@@ -212,12 +218,36 @@
   cursor: pointer;
   font: inherit;
   padding: 0;
+}
+
+.repository-change-reload {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.repository-change-banner button:hover {
+.repository-change-reload:hover {
   text-decoration: none;
+}
+
+.repository-change-dismiss {
+  align-items: center;
+  border-radius: 10px;
+  corner-shape: squircle;
+  display: inline-flex;
+  flex: none;
+  height: 20px;
+  justify-content: center;
+  position: relative;
+  width: 20px;
+}
+
+.repository-change-dismiss:hover {
+  background: rgb(127 127 127 / 0.12);
+}
+
+.repository-change-dismiss .diff-search-close-icon,
+.repository-change-dismiss .diff-search-close-icon::after {
+  width: 11px;
 }
 
 .diff-search-panel {

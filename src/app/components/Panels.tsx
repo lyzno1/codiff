@@ -26,11 +26,29 @@ export function ReviewSourceLoading() {
 }
 
 export function RepositoryChangeBanner({ visible }: { visible: boolean }) {
+  const [dismissed, setDismissed] = useState(false);
+  const isVisible = visible && !dismissed;
+
   return (
-    <div aria-live="polite" className={`repository-change-banner${visible ? ' visible' : ''}`}>
-      <span>Local changes detected,</span>
-      <button onClick={() => window.location.reload()} type="button">
-        {getReloadShortcutLabel()} to reload.
+    <div aria-live="polite" className={`repository-change-banner${isVisible ? ' visible' : ''}`}>
+      <span className="repository-change-banner-content">
+        <span>Local changes detected,</span>
+        <button
+          className="repository-change-reload"
+          onClick={() => window.location.reload()}
+          type="button"
+        >
+          {getReloadShortcutLabel()} to reload.
+        </button>
+      </span>
+      <button
+        aria-label="Dismiss update banner"
+        className="repository-change-dismiss"
+        onClick={() => setDismissed(true)}
+        title="Dismiss"
+        type="button"
+      >
+        <span aria-hidden className="diff-search-close-icon" />
       </button>
     </div>
   );
